@@ -1,11 +1,12 @@
-# Deephaven with QuestDB persistent store
-Deephaven Community doesn't currently provide a solution to persist data on a server backend. Here we show how we can leverage QuestDB to do it anyway, by
+# Deephaven + QuestDB persistent storage
+### TLDR;
+Deephaven Community doesn't provide built-in connectivity to a DB backend (as of Oct 2022). Here, we leverage QuestDB to add that persistence layer, by   
 * subscribing to [Cryptofeed](https://github.com/bmoscon/cryptofeed)'s websockets
-* pushing the data onto Kafka to create a stream
-* persisting the data in QuestDB
-* modifying the Deephaven Community version to access QuestDB via Postgres db connector 
+* pushing tick data onto Kafka to create a stream for Deephaven
+* persisting all data to QuestDB to collect historical data
+* accessing stream and historical data from the DH UI 
 
-### One-time setup (only do this once a given host!)
+### One-time setup (only required to do once per host!)
 * Create a docker network with dedicated IP range so all docker containers can talk to each other<br>
 ```docker network create --subnet "192.168.0.0/16" dhquestnet```
 
@@ -17,76 +18,65 @@ Deephaven Community doesn't currently provide a solution to persist data on a se
 ```docker-compose -f docker-compose-deephaven.yml up -d```
 
 
-## Create a conda env (or whatever you prefer) and start producing some tick data via Cryptofeed  
+## Create a conda env (or whatever you prefer) and start producing some tick data via Cryptofeed
+Ideally, this becomes just another docker image that runs 24/7 on some server. For now, run this locally:  
 ```     
-    conda create -n dh_quest python=3.7
+    conda create -n dh_quest python=3.8
     conda activate dh_questdb
     pip install -r requirements.txt
-    python dhquest/1_run_cryptofeed.py      
+    pip install -e .           
+    python dhquest/1_run_cryptofeed.py       
+```
+## Go to Deephaven UI
+* QuestDB server is running at http://192.168.0.10:9000/, you should see a 'trades' table right away 
+* To open the Deephaven UI, go to http://localhost:10000/ide/) and open the ```dh_questdb.py``` from the File Explorer,
+ or create a new script with code below
 ```
 
+import deephaven.dtypes as dht
+from deephaven.stream.kafka.consumer import TableType, KeyValueSpec
+from deephaven import kafka_consumer as ck
+from deephaven import pandas as dhpd
+from dhquest import qdb  # custom 'qdb' module as part of this repo
 
 
-## Deephaven IDE 
-Head over to http://localhost:10000/ide/ (if it's not working, try re-running [3_start_deephaven.sh](./3_start_deephaven.sh) (see above), 
-and copy paste this to the Deephaven IDE and run it with Ctrl+Alt+R:
-```python
-from deephaven.ParquetTools import writeTable, readTable
-from deephaven import ConsumeKafka as ck
-from deephaven import Types as dht
-from deephaven.MovingAverages import ByEmaSimple
-from deephaven import Aggregation as agg, as_list
-from deephaven import tableToDataFrame, dataFrameToTable
-from deephaven.DateTimeUtils import convertDateTime
-import pandas as pd
-from deephaven.DateTimeUtils import autoEpochToTime
-import datetime
-from deephaven.TableTools import timeTable
-#{"exchange":"COINBASE","symbol":"BTC-USD","side":"sell","amount":0.00133965,"price":44963.12,"id":"304048514","type":null,"timestamp":1648404388.130469,"receipt_timestamp":1648404388.155557}
+########################################
+# call wrapper func to QuestDB
+trades = qdb.get_trades(last_nticks=1000)
 
-def parse_timestamp(x):
-    return convertDateTime(datetime.datetime.utcfromtimestamp(x).isoformat() + ' UTC')
+candles = qdb.get_candles(sample_by='1m')
 
 
-trades_dex = ck.consumeToTable(
-    {'bootstrap.servers': 'redpanda:29092'},
-    'trades_dex',
-    key = ck.IGNORE,   
-    value = ck.json([
-            ('ts', dht.double),            
-            ('exchange', dht.string),
-            ('product_id', dht.string),
-            ('side', dht.string),
-            ('size', dht.double),
-            ('price', dht.double),
-            ('trade_id', dht.string),
-            ]),   
-    offsets = {0: 0},
-    table_type='append')\
-    .updateView("ts = (DateTime)parse_timestamp(ts)")
+########################################
+# call QuestDB SQL directly 
+query = """
+    SELECT * FROM trades
+    WHERE symbol = 'BTC-USD'
+    LIMIT -100
+"""    
+trades_btc = qdb.run_query(query)
 
 
-trades_cex = ck.consumeToTable(
+########################################
+# or subscribe to stream from  Kafka
+trades_latest = ck.consume(
     {'bootstrap.servers': 'redpanda:29092'},
     'trades',
-    key = ck.IGNORE,   
-    value = ck.json([
-            ('ts', dht.double),
-            ('exchange', dht.string),
-            ('product_id', dht.string),
-            ('side', dht.string),
-            ('size', dht.double),
-            ('price', dht.double),
-            ('trade_id', dht.string),
-            ]),
-    offsets = {0: 0},
-    table_type='append')\
-    .updateView("ts = (DateTime)parse_timestamp(ts)")
-    
-```
-
-
-
+    key_spec=KeyValueSpec.IGNORE,
+    value_spec = ck.json_spec([
+        ('ts', dht.DateTime),
+        ('receipt_ts', dht.DateTime),
+        ('symbol', dht.string),
+        ('exchange', dht.string),
+        ('side', dht.string),
+        ('size', dht.double),
+        ('price', dht.double),
+    ]),    
+    table_type=TableType.stream())\
+.update_view([
+   "latency_ms = (receipt_ts - ts) / 1e6",
+ ]).last_by(['symbol'])
+```    
 
 
 

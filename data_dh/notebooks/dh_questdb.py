@@ -7,9 +7,9 @@ from dhquest import qdb  # custom lib
 
 ########################################
 # call wrapper func to QuestDB
-trades = qdb.get_trades(1000)
+trades = qdb.get_trades(last_nticks=1000)
 
-candles = qdb.get_candles('1m')
+candles = qdb.get_candles(sample_by='1m')
 
 ########################################
 # call QuestDB SQL directly 
