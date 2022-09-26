@@ -1,0 +1,8 @@
+FROM ghcr.io/deephaven/server:${VERSION:-latest}
+RUN apt-get update -y
+RUN apt-get install build-essential python3-dev -y
+COPY requirements.txt /deephaven-questdb/requirements.txt
+COPY setup.py /deephaven-questdb/setup.py
+COPY ./dhquest /deephaven-questdb/dhquest
+RUN pip3 install -r /deephaven-questdb/requirements.txt
+

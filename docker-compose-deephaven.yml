@@ -1,0 +1,66 @@
+version: "3.4"
+
+services:
+  server:
+    container_name: dh_server
+    build:
+      context: .
+      dockerfile: docker_files/Dockerfile.dh_server
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx24g -Ddeephaven.console.type=python -Ddeephaven.application.dir=/data_dh/app.d
+    expose:
+      - '8080'
+    volumes:
+      - ./data_dh:/data
+      - api-cache:/cache
+    networks:
+      - dhquestnet
+
+  web:
+    container_name: dh_web
+    image: ghcr.io/deephaven/web:${VERSION:-edge}
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx4g
+    expose:
+      - '80'
+    volumes:
+      - ./data_dh:/data
+      - web-tmp:/tmp
+    networks:
+      - dhquestnet
+
+  grpc-proxy:
+    container_name: dh_grpc-proxy
+    image: ghcr.io/deephaven/grpc-proxy:${VERSION:-edge}
+    environment:
+      - BACKEND_ADDR=server:8080
+    depends_on:
+      - server
+    expose:
+      - '8080'
+    networks:
+      - dhquestnet
+
+  envoy:
+    container_name: dh_envoy
+    image: ghcr.io/deephaven/envoy:${VERSION:-edge}
+    depends_on:
+      - web
+      - grpc-proxy
+      - server
+    ports:
+      - "${PORT:-10000}:10000"
+    networks:
+      - dhquestnet
+
+volumes:
+    web-tmp:
+    api-cache:
+
+# run once on CLI: "docker network create --subnet "192.168.0.0/16" dhquestnet"
+networks:
+  dhquestnet:
+    external: true
+
+
+
