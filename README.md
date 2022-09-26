@@ -20,7 +20,7 @@ Deephaven Community doesn't provide built-in connectivity to a DB backend (as of
 
 ## Create a conda env (or whatever you prefer) and start producing some tick data via Cryptofeed
 Ideally, this becomes just another docker image that runs 24/7 on some server. For now, run this locally:  
-```     
+```
     conda create -n dh_quest python=3.8
     conda activate dh_questdb
     pip install -r requirements.txt
@@ -31,8 +31,7 @@ Ideally, this becomes just another docker image that runs 24/7 on some server. F
 * QuestDB server is running at http://192.168.0.10:9000/, you should see a 'trades' table right away 
 * To open the Deephaven UI, go to http://localhost:10000/ide/) and open the ```dh_questdb.py``` from the File Explorer,
  or create a new script with code below
-```
-
+```python
 import deephaven.dtypes as dht
 from deephaven.stream.kafka.consumer import TableType, KeyValueSpec
 from deephaven import kafka_consumer as ck
