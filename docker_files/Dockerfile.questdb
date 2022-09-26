@@ -1,0 +1,2 @@
+FROM questdb/questdb
+COPY ./docker_files/server.conf /root/.questdb/conf/server.conf
