@@ -21,7 +21,6 @@ services:
     ports:
       - 9092:9092
       - 29092:29092
-    restart: always
     networks:
       dhquestnet:
         ipv4_address: 192.168.0.2  # set explicitly
@@ -31,7 +30,6 @@ services:
     build:
       context: .
       dockerfile: docker_files/Dockerfile.questdb
-    restart: always
     ports:
       - 8812:8812
       - 9000:9000

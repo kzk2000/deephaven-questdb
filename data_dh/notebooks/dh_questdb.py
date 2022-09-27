@@ -25,6 +25,19 @@ trades_btc = qdb.run_query(query)
 candles_btc = candles.where(['(String)symbol==`BTC-USD`'])
 
 
+candles2 = candles.select(["symbol2 = (java.lang.String)symbol")
+meta_table = candles.meta_table
+
+from deephaven import new_table
+
+from deephaven.column import string_col, int_col
+
+result = new_table([
+   string_col("Name_Of_String_Col", candles.select(['symbol_[ii]'])),   
+])
+
+
+kk = candles.select(['X=symbol_[ii]'])
 ########################################
 # or subscribe to stream from  Kafka
 trades_latest = ck.consume(
