@@ -24,8 +24,8 @@ docker-compose -f docker-compose-deephaven.yml build --force
 docker-compose -f docker-compose-deephaven.yml up -d
 ```
 ### Step 3: Open Deephaven Web UI
-* Go to http://localhost:10000/ide/) and open the ```dh_questdb.py``` from the File Explorer,
- or create a new script and copy-paste below
+Go to http://localhost:10000/ide/) and open the [dh_questdb.py](./data_dh/notebooks/dh_questdb.py) from the File Explorer. <br>
+Code shown here for quick reference:
 ```python
 import deephaven.dtypes as dht
 from deephaven.stream.kafka.consumer import TableType, KeyValueSpec
