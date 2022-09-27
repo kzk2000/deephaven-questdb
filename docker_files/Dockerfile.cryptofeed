@@ -1,0 +1,7 @@
+FROM python:3.8-bullseye
+ENV IS_DOCKER True
+COPY requirements.txt /deephaven-questdb/requirements.txt
+COPY setup.py /deephaven-questdb/setup.py
+COPY ./dhquest /deephaven-questdb/dhquest
+RUN pip3 install -r /deephaven-questdb/requirements.txt
+ENTRYPOINT ["python", "/deephaven-questdb/dhquest/scripts/1_run_cryptofeed.py"]
