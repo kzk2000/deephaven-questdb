@@ -18,9 +18,11 @@ candles = qdb.get_candles(sample_by='1m')
 query = """
     SELECT * FROM trades
     WHERE symbol = 'BTC-USD'
-    LIMIT -1000
+    LIMIT -20000
 """    
 trades_btc = qdb.run_query(query)
+
+candles_btc = candles.where(['(String)symbol==`BTC-USD`'])
 
 
 ########################################
