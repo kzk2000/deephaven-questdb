@@ -5,21 +5,22 @@ from deephaven import kafka_consumer as ck
 from deephaven import pandas as dhpd
 from dhquest import qdb  # custom lib
 
+
 ########################################
 # call wrapper func to QuestDB
 trades = qdb.get_trades(last_nticks=1000)
 
 candles = qdb.get_candles(sample_by='1m')
 
+
 ########################################
 # call QuestDB SQL directly 
 query = """
     SELECT * FROM trades
     WHERE symbol = 'BTC-USD'
-    LIMIT -100
+    LIMIT -1000
 """    
 trades_btc = qdb.run_query(query)
-
 
 
 ########################################

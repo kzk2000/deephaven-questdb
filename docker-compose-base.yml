@@ -17,16 +17,17 @@ services:
       - --advertise-kafka-addr
       - PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
     image: docker.vectorized.io/vectorized/redpanda:latest
-    container_name: dh_redpanda
+    container_name: redpanda
     ports:
       - 9092:9092
       - 29092:29092
+    restart: always
     networks:
       dhquestnet:
         ipv4_address: 192.168.0.2  # set explicitly
 
   questdb:
-    container_name: dh_questdb
+    container_name: questdb
     build:
       context: .
       dockerfile: docker_files/Dockerfile.questdb
@@ -40,6 +41,16 @@ services:
     networks:
       dhquestnet:
         ipv4_address: 192.168.0.10  # set explicitly
+
+  cryptofeed:
+    container_name: cryptofeed
+    build:
+      context: .
+      dockerfile: docker_files/Dockerfile.cryptofeed
+    depends_on:
+      - redpanda
+    networks:
+      - dhquestnet
 
 # run once on CLI: "docker network create --subnet "192.168.0.0/16" dhquestnet"
 networks:

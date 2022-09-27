@@ -10,27 +10,22 @@ Deephaven Community doesn't provide built-in connectivity to a DB backend (as of
 * Create a docker network with dedicated IP range so all docker containers can talk to each other<br>
 ```docker network create --subnet "192.168.0.0/16" dhquestnet```
 
-### Start all servers
-* Start the Redpanda's Kafka broker and the QuestDB server (ideally, these will run forever!). We run this as separate docker-compose so we can restart the Deephaven server as needed while we keep streaming data into QuestDB:<br>
-```docker-compose -f docker-compose-base.yml up -d```
-
-* Start the Deephaven server and UI:<br>
-```docker-compose -f docker-compose-deephaven.yml up -d```
-
-
-## Create a conda env (or whatever you prefer) and start producing some tick data via Cryptofeed
-Ideally, this becomes just another docker image that runs 24/7 on some server. For now, run this locally:  
+### Step 1: Start Kafka broker, QuestDB server, and the Cryptofeed data producer
+* To see what data we subscribe to, see [1_run_cryptofeed.py](./dhquest/scripts/1_run_cryptofeed.py)
+* QuestDB server is running at http://192.168.0.10:9000/, you should see a 'trades' table right away
+* Ideally, these 3 containers just run forever.
 ```
-    conda create -n dh_quest python=3.8
-    conda activate dh_questdb
-    pip install -r requirements.txt
-    pip install -e .           
-    python dhquest/1_run_cryptofeed.py       
+docker-compose -f docker-compose-base.yml build --force
+docker-compose -f docker-compose-base.yml up -d
 ```
-## Go to Deephaven UI
-* QuestDB server is running at http://192.168.0.10:9000/, you should see a 'trades' table right away 
-* To open the Deephaven UI, go to http://localhost:10000/ide/) and open the ```dh_questdb.py``` from the File Explorer,
- or create a new script with code below
+### Step 2: Start Deephaven servers 
+```
+docker-compose -f docker-compose-deephaven.yml build --force  
+docker-compose -f docker-compose-deephaven.yml up -d
+```
+### Step 3: Open Deephaven Web UI
+* Go to http://localhost:10000/ide/) and open the ```dh_questdb.py``` from the File Explorer,
+ or create a new script and copy-paste below
 ```python
 import deephaven.dtypes as dht
 from deephaven.stream.kafka.consumer import TableType, KeyValueSpec
