@@ -35,8 +35,6 @@ class DHBookQuest(QuestCallback):
 
 class KafkaCallback:
     def __init__(self, bootstrap='127.0.0.1', port=9092, topic=None, numeric_type=float, none_to=None, **kwargs):  # working locally
-    #def __init__(self, bootstrap='redpanda', port=29092, topic=None, numeric_type=float, none_to=None, **kwargs):  # working from Docker!!
-    #def __init__(self, bootstrap='localhost', port=9092, topic=None, numeric_type=float, none_to=None, **kwargs):
         """
         bootstrap: str, list
             if a list, should be a list of strings in the format: ip/host:port, i.e.
