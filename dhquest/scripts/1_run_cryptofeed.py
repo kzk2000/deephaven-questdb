@@ -10,6 +10,7 @@ from dhquest.dhcallbacks import DHTradeQuest, DHTradeKafka
 async def my_print(data, _receipt_time):
     print(data)
 
+
 def main():
     # see docker_files/Dockerfile.cryptofeed where we set IS_DOCKER=True
     # by doing this here, we can also run this script locally
