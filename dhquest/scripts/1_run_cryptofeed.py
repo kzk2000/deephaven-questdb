@@ -1,10 +1,14 @@
 import os
+import time
 from cryptofeed import FeedHandler
 from cryptofeed.defines import TRADES
 from cryptofeed.exchanges import Coinbase
 
 from dhquest.dhcallbacks import DHTradeQuest, DHTradeKafka
 
+
+async def my_print(data, _receipt_time):
+    print(data)
 
 def main():
     # see docker_files/Dockerfile.cryptofeed where we set IS_DOCKER=True
@@ -19,9 +23,14 @@ def main():
     f = FeedHandler()
     f.add_feed(Coinbase(channels=[TRADES],
                         symbols=['BTC-USD', 'ETH-USD', 'SOL-USD', 'AVAX-USD'],
-                        callbacks={TRADES: [dh_tradekafka, dh_tradequest]}))
+                        callbacks={TRADES: [dh_tradekafka, dh_tradequest, my_print]}))
     f.run()
 
 
 if __name__ == '__main__':
+    # when running via docker-compose, do retries in case the Kafka broker isn't fully up yet
+    if os.environ.get('IS_DOCKER'):
+        print('Delay start by 10sec so that Kafka broker and QuestDB are ready')
+        time.sleep(10)
+
     main()
