@@ -18,6 +18,8 @@ Deephaven Community doesn't provide built-in connectivity to a DB backend (as of
 docker-compose -f docker-compose-base.yml build --force
 docker-compose -f docker-compose-base.yml up -d
 ```
+To make sure data is ticking, run ```docker logs cryptofeed -f``` and you should see ticks coming in after a 10sec delay.<br>
+Worst case, try ```docker stop cryptofeed && docker start crytpofeed```. 
 ### Step 2: Start Deephaven servers 
 ```
 docker-compose -f docker-compose-deephaven.yml build --force  
@@ -31,7 +33,7 @@ import deephaven.dtypes as dht
 from deephaven.stream.kafka.consumer import TableType, KeyValueSpec
 from deephaven import kafka_consumer as ck
 from deephaven import pandas as dhpd
-from dhquest import qdb  # custom 'qdb' module as part of this repo
+from dhquest import qdb  # custom lib
 
 
 ########################################
@@ -46,9 +48,11 @@ candles = qdb.get_candles(sample_by='1m')
 query = """
     SELECT * FROM trades
     WHERE symbol = 'BTC-USD'
-    LIMIT -100
+    LIMIT -200
 """    
 trades_btc = qdb.run_query(query)
+
+candles_btc = candles.where(['symbol==`BTC-USD`'])
 
 
 ########################################
