@@ -10,6 +10,7 @@ from dhquest import qdb  # custom lib
 trades = qdb.get_trades(last_nticks=1000)
 
 candles = qdb.get_candles(sample_by='1m')
+candles_btc = candles.where(['symbol==`BTC-USD`'])
 
 
 ########################################
@@ -20,9 +21,6 @@ query = """
     LIMIT -200
 """    
 trades_btc = qdb.run_query(query)
-
-candles_btc = candles.where(['symbol==`BTC-USD`'])
-
 
 
 ########################################
