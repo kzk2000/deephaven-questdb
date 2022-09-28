@@ -29,7 +29,6 @@ def main():
 
 
 if __name__ == '__main__':
-    # when running via docker-compose, do retries in case the Kafka broker isn't fully up yet
     if os.environ.get('IS_DOCKER'):
         print('Delay start by 10sec so that Kafka broker and QuestDB are ready')
         time.sleep(10)
