@@ -2,6 +2,7 @@ import deephaven.dtypes as dht
 from deephaven.stream.kafka.consumer import TableType, KeyValueSpec
 from deephaven import kafka_consumer as ck
 from deephaven import pandas as dhpd
+from deephaven.plot.figure import Figure
 from dhquest import qdb  # custom lib
 
 
@@ -9,9 +10,14 @@ from dhquest import qdb  # custom lib
 # call wrapper func to QuestDB
 trades = qdb.get_trades(last_nticks=1000)
 
-candles = qdb.get_candles(sample_by='5m')
+candles = qdb.get_candles(sample_by='1m')
 candles_btc = candles.where(['symbol == `BTC-USD`'])
 
+# plot candles from QuestDB (static, will not update)
+plot_btc_candles = Figure()\
+    .chart_title(title="BTC OHLC - 1min candles from QuestDB (non-ticking)")\
+    .plot_ohlc(series_name="BTC", t=candles_btc, x="ts", open="openp", high="highp", low="lowp", close="closep")\
+    .show()
 
 ########################################
 # call QuestDB SQL directly 
