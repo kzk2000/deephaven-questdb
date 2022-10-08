@@ -1,4 +1,4 @@
-FROM ghcr.io/deephaven/server:${VERSION:-latest}
+FROM ghcr.io/deephaven/server:0.17.0
 RUN apt-get update -y
 RUN apt-get install build-essential python3-dev -y
 COPY requirements.txt /deephaven-questdb/requirements.txt

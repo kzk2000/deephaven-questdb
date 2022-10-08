@@ -2,9 +2,9 @@
 ### TLDR;
 Deephaven Community doesn't provide built-in connectivity to a DB backend (as of Oct 2022). Here, we leverage QuestDB to add that persistence layer, by   
 * subscribing to [Cryptofeed](https://github.com/bmoscon/cryptofeed)'s websockets
-* pushing tick data onto Kafka to create a stream for Deephaven
-* persisting all data to QuestDB to collect historical data
-* accessing stream and historical data from the DH UI 
+* pushing the tick data onto Kafka to create data streams for Deephaven
+* persisting all the data to QuestDB to collect historical data
+* accessing streams and historical data from the DH UI 
 
 ### One-time setup (only required to do once per host!)
 * Create a docker network with dedicated IP range so all docker containers can talk to each other<br>

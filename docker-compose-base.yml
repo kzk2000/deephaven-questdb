@@ -26,16 +26,14 @@ services:
         ipv4_address: 192.168.0.2  # set explicitly
 
   questdb:
+    image: questdb/questdb:6.5.3
     container_name: questdb
-    build:
-      context: .
-      dockerfile: docker_files/Dockerfile.questdb
     ports:
       - 8812:8812
       - 9000:9000
       - 9009:9009
     volumes:
-      - ./data_questdb:/root/.questdb
+      - ./data_questdb:/var/lib/questdb
     networks:
       dhquestnet:
         ipv4_address: 192.168.0.10  # set explicitly
@@ -44,7 +42,7 @@ services:
     container_name: cryptofeed
     build:
       context: .
-      dockerfile: docker_files/Dockerfile.cryptofeed
+      dockerfile: dockerfiles/Dockerfile.cryptofeed
     depends_on:
       - redpanda
       - questdb

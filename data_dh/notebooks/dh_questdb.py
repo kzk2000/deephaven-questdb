@@ -9,8 +9,8 @@ from dhquest import qdb  # custom lib
 # call wrapper func to QuestDB
 trades = qdb.get_trades(last_nticks=1000)
 
-candles = qdb.get_candles(sample_by='1m')
-candles_btc = candles.where(['symbol==`BTC-USD`'])
+candles = qdb.get_candles(sample_by='5m')
+candles_btc = candles.where(['symbol == `BTC-USD`'])
 
 
 ########################################
@@ -41,5 +41,7 @@ trades_latest = ck.consume(
     table_type=TableType.stream())\
 .update_view([
    "latency_ms = (receipt_ts - ts) / 1e6",
- ]).last_by(['symbol'])
+ ]).last_by(['symbol'])\
+ .drop_columns(['KafkaPartition', 'KafkaOffset', 'KafkaTimestamp'])
+
     
