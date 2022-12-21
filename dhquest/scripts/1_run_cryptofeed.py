@@ -22,9 +22,20 @@ def main():
     dh_tradequest = DHTradeQuest(host='192.168.0.10', port=9009)
 
     f = FeedHandler()
+
+    # FIXME: there should be no need to split these but sometimes they won't start ticking otherwise
     f.add_feed(Coinbase(channels=[TRADES],
-                        symbols=['BTC-USD', 'ETH-USD', 'SOL-USD', 'AVAX-USD'],
+                        symbols=['BTC-USD'],
                         callbacks={TRADES: [dh_tradekafka, dh_tradequest, my_print]}))
+
+    f.add_feed(Coinbase(channels=[TRADES],
+                        symbols=['ETH-USD'],
+                        callbacks={TRADES: [dh_tradekafka, dh_tradequest, my_print]}))
+
+    f.add_feed(Coinbase(channels=[TRADES],
+                        symbols=['SOL-USD', 'AVAX-USD'],
+                        callbacks={TRADES: [dh_tradekafka, dh_tradequest, my_print]}))
+
     f.run()
 
 

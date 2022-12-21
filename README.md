@@ -18,7 +18,7 @@ Deephaven Community doesn't provide built-in connectivity to a DB backend (as of
 docker-compose -f docker-compose-base.yml build --force
 docker-compose -f docker-compose-base.yml up -d
 ```
-To make sure data is ticking, run ```docker logs cryptofeed -f``` and you should see ticks coming in after a 10sec delay.<br>
+To make sure data is ticking, run ```docker logs cryptofeed -n10 -f -t``` and you should see ticks coming in after a 10sec delay.<br>
 Worst case, try ```docker stop cryptofeed && docker start crytpofeed```. 
 ### Step 2: Start Deephaven servers 
 ```
@@ -26,7 +26,7 @@ docker-compose -f docker-compose-deephaven.yml build --force
 docker-compose -f docker-compose-deephaven.yml up -d
 ```
 ### Step 3: Open Deephaven Web UI
-Go to http://localhost:10000/ide/) and open the [dh_questdb.py](./data_dh/notebooks/dh_questdb.py) from the File Explorer. <br>
+Go to http://localhost:10000/ide/) and open the [dh_questdb.py](data/notebooks/dh_questdb.py) from the File Explorer. <br>
 Code shown here for quick reference:
 ```python
 import deephaven.dtypes as dht

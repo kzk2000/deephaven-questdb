@@ -2,16 +2,17 @@ version: "3.4"
 
 services:
   server:
-    container_name: dh_server
+    container_name: deephaven
     build:
       context: .
       dockerfile: dockerfiles/Dockerfile.deephaven
     environment:
-      JAVA_TOOL_OPTIONS: -Xmx24g -Ddeephaven.console.type=python -Ddeephaven.application.dir=/data/app.d
+      JAVA_OPTS: -Xmx16g -Dio.deephaven.app.GcApplication.enabled=true
+      START_OPS: -Ddeephaven.console.type=python -Ddeephaven.application.dir=/data/storage/app.d
     ports:
       - '10000:10000'
     volumes:
-      - ./data_dh:/data
+      - ./data:/data/storage
     networks:
       - dhquestnet
 
