@@ -9,7 +9,7 @@ def get_connection():
     return psycopg2.connect(
         user='admin',
         password='quest',
-        host='192.168.0.10',
+        host='questdb',  # Docker Compose service name
         port='8812',
         database='qdb')
 

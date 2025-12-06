@@ -1,0 +1,9 @@
+type=script
+scriptType=python
+enabled=true
+id=cryptofeed
+name=CryptoFeed
+#file_0=./init_app.py
+#file_1=/data/storage/notebooks/stream_trades.py
+#file_2=/data/storage/notebooks/ui_dashboard.py
+#file_3=/data/storage/notebooks/stream_orderbooks_curated.py
