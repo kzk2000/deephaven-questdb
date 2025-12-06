@@ -13,11 +13,8 @@ parts
 .installed.cfg
 *.tar
 *.mo
-feedhandler.log
-dhquest/scipts/*.log
-data_questdb/db/*
-data_questdb/public/*
-data_questdb/conf/*
-
-
 data/questdb/
+
+# QuestDB runtime data (created by container)
+data/questdb/*
+!data/questdb/.gitkeep
