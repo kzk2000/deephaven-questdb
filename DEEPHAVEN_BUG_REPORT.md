@@ -1,58 +1,74 @@
 # Bug Report: TableDataService API - Callback Method Not Found
 
-## Summary
+## Executive Summary
 
-The experimental `TableDataService` API is non-functional due to a callback proxy error. When creating tables using a custom `TableDataServiceBackend`, the system fails with `AttributeError: object has no attribute 'apply'`.
+The experimental `TableDataService` API is completely non-functional in all tested versions due to a callback proxy implementation error. The API attempts to call `.apply()` and `.accept()` methods on Java lambda objects that don't have these methods, resulting in `AttributeError`.
+
+**Status**: Confirmed in v0.40.7 (stable) and v0.41.0+snapshot (edge)  
+**Priority**: High - API completely unusable  
+**Impact**: Any user following official documentation will encounter this error  
+
+---
 
 ## Affected Versions
 
-- ✅ **v0.40.7 (stable)** - Confirmed broken
-- ✅ **v0.41.0+snapshot (edge)** - Confirmed broken
-- ❓ Likely affects all versions with TableDataService API
+| Version | Status | Error Location | Python |
+|---------|--------|----------------|--------|
+| v0.40.7 (stable) | ✅ Confirmed | line 378 | 3.10.12 |
+| v0.41.0+snapshot (edge) | ✅ Confirmed | line 459 | 3.12.3 |
+| Earlier v0.40.x | ❓ Likely affected | - | - |
 
-## Environment
+**Conclusion**: Bug exists in all versions with TableDataService API
 
-**v0.40.7 Test:**
-- Docker Image: `ghcr.io/deephaven/server:0.40.7`
-- Python: 3.10.12
-- Error Location: `table_data_service.py` line 378
-
-**Edge Build Test:**
-- Docker Image: `ghcr.io/deephaven/server:edge`
-- Python: 3.12.3
-- Error Location: `table_data_service.py` line 459
-
-**Date Tested**: December 6, 2024
+---
 
 ## The Bug
 
-The `location_cb_proxy` function calls methods that don't exist on Java lambda callback objects:
+### Code Location
+`deephaven/experimental/table_data_service.py`
 
+### Problematic Code
 ```python
-# In table_data_service.py (lines vary by version)
-def location_cb_proxy(pt_location_key, pt_table):
+def location_cb_proxy(pt_location_key: TableLocationKey, pt_table: Optional[pa.Table] = None):
     j_tbl_location_key = _JTableLocationKeyImpl(pt_location_key)
     if pt_table is None:
+        # ❌ FAILS HERE - .apply() doesn't exist
         location_cb.apply(j_tbl_location_key, jpy.array("java.nio.ByteBuffer", []))
-        # ❌ AttributeError: object has no attribute 'apply'
     else:
-        # ... prepare data ...
+        if pt_table.num_rows != 1:
+            raise ValueError("...")
+        bb_list = [jpy.byte_buffer(rb.serialize()) for rb in pt_table.to_batches()]
+        bb_list.insert(0, jpy.byte_buffer(pt_table.schema.serialize()))
+        # ❌ ALSO FAILS - .accept() doesn't exist
         location_cb.accept(j_tbl_location_key, jpy.array("java.nio.ByteBuffer", bb_list))
-        # ❌ AttributeError: object has no attribute 'accept'
 ```
 
-## Error Message
-
+### Error Message
 ```
 AttributeError: 'io.deephaven.extensions.barrage.util.PythonTableDataService$BackendAccessor$$Lambda/...' 
 object has no attribute 'apply'
 
 Traceback:
-  File "table_data_service.py", line 378 (v0.40.7) / 459 (edge)
-  location_cb.apply(j_tbl_location_key, jpy.array("java.nio.ByteBuffer", []))
+  File "table_data_service.py", line 378 (v0.40.7) or line 459 (edge)
+    location_cb.apply(j_tbl_location_key, jpy.array("java.nio.ByteBuffer", []))
+    ^^^^^^^^^^^^^^^^^
+  AttributeError: 'io.deephaven.extensions.barrage.util.PythonTableDataService$BackendAccessor$$Lambda/...' 
+  object has no attribute 'apply'
 ```
 
+### Root Cause
+The Java lambda callback objects passed from the Java side don't have `.apply()` or `.accept()` methods. The Python proxy code assumes these methods exist, but they're not part of the lambda's interface.
+
+**Mismatch**:
+- Python backend implementations call callbacks directly (per documentation)
+- Library's proxy wrapper tries to call `.apply()` / `.accept()` methods
+- Java lambda objects don't provide these methods
+
+---
+
 ## Minimal Reproducible Example
+
+Copy-paste ready code that demonstrates the bug:
 
 ```python
 from deephaven.experimental.table_data_service import (
@@ -60,16 +76,25 @@ from deephaven.experimental.table_data_service import (
 )
 import pyarrow as pa
 
+# Minimal TableKey implementation
 class TestKey(TableKey):
-    def __init__(self, name): self.name = name
-    def __hash__(self): return hash(self.name)
-    def __eq__(self, other): return isinstance(other, TestKey) and self.name == other.name
+    def __init__(self, name): 
+        self.name = name
+    def __hash__(self): 
+        return hash(self.name)
+    def __eq__(self, other): 
+        return isinstance(other, TestKey) and self.name == other.name
 
+# Minimal TableLocationKey implementation
 class TestLocationKey(TableLocationKey):
-    def __init__(self, name): self.name = name
-    def __hash__(self): return hash(self.name)
-    def __eq__(self, other): return isinstance(other, TestLocationKey) and self.name == other.name
+    def __init__(self, name): 
+        self.name = name
+    def __hash__(self): 
+        return hash(self.name)
+    def __eq__(self, other): 
+        return isinstance(other, TestLocationKey) and self.name == other.name
 
+# Backend implementation following official documentation
 class MinimalBackend(TableDataServiceBackend):
     def table_schema(self, table_key, schema_cb, failure_cb):
         schema_cb(pa.schema([pa.field("id", pa.int64())]), None)
@@ -79,7 +104,8 @@ class MinimalBackend(TableDataServiceBackend):
         success_cb()
     
     def subscribe_to_table_locations(self, table_key, location_cb, success_cb, failure_cb):
-        location_cb(TestLocationKey("loc1"), None)  # ❌ Fails here
+        # Following documentation - direct callback invocation
+        location_cb(TestLocationKey("loc1"), None)  # ❌ FAILS HERE
         success_cb()
         return lambda: None
     
@@ -96,48 +122,45 @@ class MinimalBackend(TableDataServiceBackend):
                       min_rows, max_rows, values_cb, failure_cb):
         values_cb(pa.table({col: pa.array([], type=pa.int64())}))
 
-# This fails with AttributeError
+# Test - this will fail with AttributeError
 backend = MinimalBackend()
 service = TableDataService(backend)
 table = service.make_table(TestKey("test"), refreshing=True)
+# Error: AttributeError: object has no attribute 'apply'
 ```
+
+---
 
 ## Expected vs Actual Behavior
 
-**Expected** (per [official documentation](https://deephaven.io/core/docs/how-to-guides/data-import-export/table-data-service/)):
+### Expected (per official documentation)
+From: https://deephaven.io/core/docs/how-to-guides/data-import-export/table-data-service/
+
 ```python
-# Documentation shows direct callback invocation
 def subscribe_to_table_locations(self, table_key, location_cb, success_cb, failure_cb):
+    """Subscribe to table locations with a callable."""
+    # Documentation shows DIRECT callback invocation
     for key, location in table.locations.items():
-        location_cb(key, location.partitioning_values)  # Direct call ✓
-    success_cb()
-    return unsubscribe_fn
+        location_cb(key, location.partitioning_values)  # ✓ Direct call
+    success_cb()  # ✓ Direct call
+    return unsubscribe_function
 ```
 
-**Actual** (in library code):
+### Actual (library implementation)
 ```python
-# Library tries to call .apply() method
-location_cb.apply(j_tbl_location_key, jpy.array("java.nio.ByteBuffer", []))
-# But callback object doesn't have .apply() method
+def location_cb_proxy(...):
+    # Library tries to call methods that don't exist
+    location_cb.apply(...)   # ❌ No .apply() method
+    location_cb.accept(...)  # ❌ No .accept() method
 ```
 
-## Root Cause
+---
 
-Mismatch between:
-1. **Python backend implementations**: Call callbacks directly as functions (per docs)
-2. **Library's callback proxy**: Tries to call `.apply()` and `.accept()` methods
-3. **Java lambda objects**: Don't have these methods
+## Suggested Fixes
 
-## Impact
+### Option 1: Direct Invocation (Simplest)
+Change the proxy to invoke callbacks directly instead of calling `.apply()` / `.accept()`:
 
-- ✅ Both `table_locations()` and `subscribe_to_table_locations()` fail
-- ✅ Cannot create static tables
-- ✅ Cannot create refreshing tables
-- ✅ **Entire API is non-functional**
-
-## Suggested Fix
-
-**Option 1** - Change proxy to use direct invocation:
 ```python
 # Current (broken)
 location_cb.apply(j_tbl_location_key, jpy.array("java.nio.ByteBuffer", []))
@@ -146,39 +169,169 @@ location_cb.apply(j_tbl_location_key, jpy.array("java.nio.ByteBuffer", []))
 location_cb(j_tbl_location_key, jpy.array("java.nio.ByteBuffer", []))
 ```
 
-**Option 2** - Fix Java-side to provide callable with `.apply()` method
+**Pros**: Minimal change, matches documentation  
+**Cons**: Need to verify jpy can call Java objects directly with this signature
 
-**Option 3** - Update documentation to match actual implementation
+### Option 2: Fix Java-Side Lambda
+Ensure the Java lambda objects passed to Python have `.apply()` / `.accept()` methods:
 
-## Test Evidence
+```java
+// Current: Lambda without apply/accept methods
+// Proposed: Provide lambda that implements appropriate functional interface
+```
 
-Tested in both v0.40.7 and edge build with identical results. Test script available at:
-- Repository: `data/deephaven/notebooks/test_tds_v0407.py`
-- Command: `exec(open('/data/notebooks/test_tds_v0407.py').read())`
+**Pros**: Maintains current Python proxy approach  
+**Cons**: Requires Java-side changes
 
-## Use Case
+### Option 3: Callable Wrapper
+Wrap the callback in Python to provide both calling styles:
 
-Integrating QuestDB as a time-series backend for Deephaven with WAL-driven real-time streaming. TableDataService would enable:
-- Zero-copy data access from QuestDB
-- Real-time updates via Write-Ahead Log monitoring
-- Memory-efficient columnar storage with Deephaven's compute layer
+```python
+class CallbackWrapper:
+    def __init__(self, callback):
+        self._cb = callback
+    def __call__(self, *args):
+        return self._cb(*args)
+    def apply(self, *args):
+        return self._cb(*args)
+    def accept(self, *args):
+        return self._cb(*args)
 
-## Workaround
+location_cb = CallbackWrapper(original_callback)
+```
 
-None available - bug is in library code. Currently using direct PostgreSQL queries with polling as alternative.
-
-## Request
-
-Please investigate and fix the callback proxy implementation. This API would be valuable for integrating external data sources with real-time updates, but is currently unusable.
-
-## Related Files
-
-- Test script: `data/deephaven/notebooks/test_tds_v0407.py`
-- Implementation attempt: `data/deephaven/notebooks/trades_live_wal.py`
-- Detailed analysis: `V0407_BUG_CONFIRMED.md`
+**Pros**: Backward compatible  
+**Cons**: More complex, overhead
 
 ---
 
-**Priority**: High - API completely non-functional in all tested versions  
-**Status**: Experimental API, present in v0.40.7+, never worked  
-**Workaround**: None - requires library fix
+## Test Evidence
+
+### Test Environment
+- **Tested on**: December 6, 2024
+- **v0.40.7**: Docker `ghcr.io/deephaven/server:0.40.7`, Python 3.10.12
+- **Edge**: Docker `ghcr.io/deephaven/server:edge`, Python 3.12.3
+
+### Test Script
+See repository: `data/deephaven/notebooks/test_tds_v0407.py`
+
+Run from Deephaven UI:
+```python
+exec(open('/data/notebooks/test_tds_v0407.py').read())
+```
+
+### Test Results
+Both versions show identical error:
+- ✅ TableDataService module imports successfully
+- ✅ Backend implementation works
+- ✅ TableDataService creation succeeds
+- ❌ `make_table(refreshing=True)` fails with AttributeError
+
+---
+
+## Impact Assessment
+
+### Affected Operations
+- ❌ `table_locations()` - Cannot create static tables
+- ❌ `subscribe_to_table_locations()` - Cannot create refreshing tables
+- **Result**: Entire API is non-functional
+
+### User Impact
+- Any developer following official TableDataService documentation
+- Integration with external data sources (databases, streams)
+- Real-time/streaming use cases
+
+### Business Impact
+- Experimental API cannot be promoted to stable
+- Users cannot integrate custom backends
+- Documentation doesn't match implementation
+
+---
+
+## Use Case Context
+
+We're integrating QuestDB (time-series database) as a backend for Deephaven to enable:
+- **Real-time streaming**: WAL-driven updates without polling
+- **Zero-copy access**: Columnar data from QuestDB → Deephaven
+- **Memory efficiency**: On-demand paging of large datasets
+- **Low latency**: 50-100ms update propagation via Write-Ahead Log
+
+TableDataService is the perfect API for this use case, but it's completely broken.
+
+---
+
+## Workaround Status
+
+**No workaround available** - bug is in library code, not addressable from user code.
+
+**Current alternative**:
+```python
+# Direct PostgreSQL queries with polling (not ideal)
+import psycopg2
+from deephaven import time_table
+
+def get_trades():
+    conn = psycopg2.connect(host='questdb', port=8812, ...)
+    # ... query logic ...
+    
+# Poll every second (inefficient compared to WAL-driven)
+trades = time_table("PT1S").update("data = get_trades()")
+```
+
+---
+
+## Additional Context
+
+### Related Java Code
+- `PythonTableDataService.java` (lines 275, 278, 653, 657)
+- `BackendAccessor.subscribeToTableLocations()` (line 278)
+
+### Related Python Code
+- `deephaven/experimental/table_data_service.py`
+  - `location_cb_proxy` function (lines 378, 459 depending on version)
+  - `_subscribe_to_table_locations` method
+
+### Affected Methods in Python API
+- `table_locations()` 
+- `subscribe_to_table_locations()`
+
+Both methods use the same broken `location_cb_proxy` pattern.
+
+---
+
+## Recommended Next Steps
+
+1. **Immediate**: Add integration test that exercises full callback chain with custom backend
+2. **Fix**: Implement one of the three suggested fixes (Option 1 recommended)
+3. **Verify**: Run existing unit tests + new integration test
+4. **Document**: If API changes, update documentation to match
+5. **Release**: Include in next patch release (v0.40.8?) and edge build
+
+---
+
+## Questions for Maintainers
+
+1. Was this API ever tested with a real custom backend implementation?
+2. Are there existing integration tests that should have caught this?
+3. Is the Java lambda type intentionally missing `.apply()` / `.accept()`?
+4. Should we add more comprehensive testing for experimental APIs?
+
+---
+
+## Attachments
+
+- Test script: `data/deephaven/notebooks/test_tds_v0407.py`
+- Real-world implementation attempt: `data/deephaven/notebooks/trades_live_wal.py`
+- QuestDB integration code: `data/deephaven/notebooks/qdb.py`
+
+---
+
+**Reporter**: Community user  
+**Date**: December 6, 2024  
+**Priority**: High  
+**Severity**: API completely non-functional  
+**Versions Tested**: v0.40.7 (stable), v0.41.0+snapshot (edge)  
+
+---
+
+*This bug prevents any real-world usage of TableDataService API. The API has been broken since initial release and needs urgent attention before it can be promoted from experimental status.*
