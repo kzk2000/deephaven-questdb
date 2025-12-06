@@ -1,6 +1,4 @@
-# Using edge build for TableDataService API (added Nov 1, 2024)
-# TODO: Switch to stable v0.41.0 when released (expected Q1 2025)
-FROM ghcr.io/deephaven/server:edge
+FROM ghcr.io/deephaven/server:0.40.7
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH="${PYTHONPATH}:/data/storage/notebooks"
 
