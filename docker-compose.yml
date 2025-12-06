@@ -64,8 +64,8 @@ services:
     networks:
       - quest_ntw
 
-  deephaven_qdb:
-    container_name: deephaven_qdb
+  deephaven:
+    container_name: deephaven
     build:
       context: docker/deephaven
     environment:
