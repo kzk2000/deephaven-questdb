@@ -1,4 +1,4 @@
-FROM ghcr.io/deephaven/server:0.40.7
+FROM ghcr.io/deephaven/server-ui:0.40.7
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH="${PYTHONPATH}:/data/storage/notebooks"
 
