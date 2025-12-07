@@ -37,22 +37,8 @@ orderbooks = create_live_table(
 
 # Add latency calculations
 orderbooks = orderbooks.update_view([
-    'now_value = now()',
-    'diff_nanos = diffNanos(timestamp, now())',
-    'diff_seconds = diff_nanos / 1e9',
+    'latency_seconds = diffNanos(timestamp, now()) / 1e9',
 ])
-
-# Create filtered views
-orderbooks_btc = orderbooks.where("symbol == `BTC-USD`")
-orderbooks_eth = orderbooks.where("symbol == `ETH-USD`")
-
-# Latest snapshot per exchange/symbol
-orderbooks_latest = orderbooks.last_by(["exchange", "symbol"])
-
-# Enable verbose logging (optional - comment out if too noisy)
-from qdb_backend import set_verbose
-set_verbose('orderbooks_compact', True)   # Watch the logs!
-
 
 if False:
     # Example: Toggle verbose mode

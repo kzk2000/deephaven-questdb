@@ -36,32 +36,8 @@ trades = create_live_table(
 ).sort_descending(order_by=['timestamp'])
 
 trades = trades.update_view([
-    'now_value = now()',
-    'diff_nanos = diffNanos(timestamp, now())',
-    'diff_seconds = diff_nanos / 1e9',
+    'latency_seconds = diffNanos(timestamp, now()) / 1e9',
 ])
-
-kk= trades.head(10)
-
-
-# Print success message
-print("="*70)
-print("SUCCESS - Live trades table created!")
-print("="*70)
-print(f"Table: trades")
-print(f"Size: {trades.size:,} rows")
-print(f"Columns: {', '.join([col.name for col in trades.columns])}")
-print("\nUsage examples:")
-print("  - View first 10: trades.head(10)")
-print("  - Filter by symbol: trades.where('symbol == \"BTC-USD\"')")
-print("  - Latest trades: trades.tail(20)")
-print("  - Check size: trades.size")
-print("\nTo stop monitoring:")
-print("  - stop_monitoring()  # Stops all monitoring threads")
-print("="*70)
-
-from qdb_backend import set_verbose
-set_verbose('trades', True)   # Watch the logs!
 
 
 if False:
