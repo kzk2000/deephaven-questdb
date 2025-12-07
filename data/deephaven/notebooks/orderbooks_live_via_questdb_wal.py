@@ -1,0 +1,67 @@
+
+# Live Orderbooks from QuestDB - Real-time Updates via WAL Monitoring
+#
+# This creates a Deephaven table backed by QuestDB storage with real-time updates
+# by monitoring QuestDB's WAL (Write-Ahead Log) for new rows.
+#
+# REQUIREMENTS: 
+# 1. Patched Deephaven (run patch_all_callbacks.py first)
+# 2. QuestDB with orderbooks_compact table receiving data
+#
+# Usage:
+#   Simply run this file, it will create an 'orderbooks' table that auto-updates
+#   Or use: from qdb_backend import create_live_table
+
+from qdb_backend import create_live_table, stop_monitoring
+
+# =============================================================================
+#  Configuration – EDIT THESE FOR YOUR ENV
+# =============================================================================
+
+TARGET_TABLE_NAME = "orderbooks_compact"  # QuestDB table to stream
+ORDER_BY_COL = "timestamp"                # Order column (usually timestamp)
+PAGE_SIZE = 32_000                        # Deephaven page size (smaller for orderbooks)
+
+
+# =============================================================================
+#  Create Live Table
+# =============================================================================
+
+# Create live table using the convenience function
+orderbooks = create_live_table(
+    table_name=TARGET_TABLE_NAME,
+    order_by_col=ORDER_BY_COL,
+    page_size=PAGE_SIZE,
+    refreshing=True
+).sort_descending(order_by=['timestamp'])
+
+# Add latency calculations
+orderbooks = orderbooks.update_view([
+    'now_value = now()',
+    'diff_nanos = diffNanos(timestamp, now())',
+    'diff_seconds = diff_nanos / 1e9',
+])
+
+# Create filtered views
+orderbooks_btc = orderbooks.where("symbol == `BTC-USD`")
+orderbooks_eth = orderbooks.where("symbol == `ETH-USD`")
+
+# Latest snapshot per exchange/symbol
+orderbooks_latest = orderbooks.last_by(["exchange", "symbol"])
+
+# Enable verbose logging (optional - comment out if too noisy)
+from qdb_backend import set_verbose
+set_verbose('orderbooks_compact', True)   # Watch the logs!
+
+
+if False:
+    # Example: Toggle verbose mode
+    from qdb_backend import set_verbose
+    set_verbose('orderbooks_compact', True)   # Watch the logs!
+    # ... wait a few seconds to see transactions ...
+    set_verbose('orderbooks_compact', False)  # Quiet again
+
+
+if False:
+    # Stop orderbooks table from ticking
+    stop_monitoring()

@@ -69,3 +69,25 @@ def get_candles(sample_by='5s', verbose=False):
         print(query)
 
     return run_query(query)
+
+
+def get_orderbooks(last_n=1000, verbose=False):
+    """
+    Get orderbook snapshots from QuestDB.
+    Uses orderbooks_compact_1s view (1-second sampled data).
+    
+    Args:
+        last_n: Number of most recent snapshots to fetch
+        verbose: Print the query
+        
+    Returns:
+        Deephaven table with orderbook data
+    """
+    query = f"""
+    SELECT * FROM orderbooks_compact_1s
+    LIMIT -{abs(last_n)}
+    """
+    if verbose:
+        print(query)
+
+    return run_query(query)

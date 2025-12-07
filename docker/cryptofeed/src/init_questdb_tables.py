@@ -8,7 +8,7 @@ import sys
 
 
 def execute_sql(host, port, sql):
-    """Execute SQL via PostgreSQL wire protocol on port 8812"""
+    """Execute SQL via Postgres SQL wire protocol on port 8812"""
     import urllib.request
     import json
     
@@ -103,15 +103,15 @@ def init_tables(host='questdb', http_port=9000, wait_for_db=True, max_retries=30
             print(f"    ℹ️  Table does not exist yet (will be auto-created on first write)")
     
     # Create materialized view if it doesn't exist
-    print(f"\n  Checking materialized view: orderbooks_latest_1s")
-    result = execute_sql(host, http_port, "SELECT view_name FROM materialized_views() WHERE view_name = 'orderbooks_latest_1s'")
+    print(f"\n  Checking materialized view: orderbooks_compact_1s")
+    result = execute_sql(host, http_port, "SELECT view_name FROM materialized_views() WHERE view_name = 'orderbooks_compact_1s'")
     
     if result and 'dataset' in result and result['dataset']:
         print(f"    ✅ Materialized view exists")
     else:
         print(f"    Creating materialized view...")
         mv_sql = """
-            CREATE MATERIALIZED VIEW orderbooks_latest_1s AS 
+            CREATE MATERIALIZED VIEW orderbooks_compact_1s AS 
             SELECT 
                 timestamp, 
                 exchange, 

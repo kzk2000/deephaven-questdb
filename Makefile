@@ -40,7 +40,6 @@ up:
 	@echo "Access points:"
 	@echo "  Deephaven: http://localhost:10000"
 	@echo "  QuestDB:   http://localhost:9000"
-	@echo "  Redpanda:  http://localhost:8080"
 
 # Stop all services
 down:
@@ -107,16 +106,13 @@ test:
 	@echo "Testing connectivity..."
 	@docker exec questdb wget -qO- http://localhost:9000/exec?query=SELECT%20count%28%2A%29%20FROM%20trades 2>/dev/null | grep -q "count" && echo "✓ QuestDB responding" || echo "✗ QuestDB not ready"
 	@curl -s http://localhost:10000 >/dev/null && echo "✓ Deephaven responding" || echo "✗ Deephaven not ready"
-	@curl -s http://localhost:8080 >/dev/null && echo "✓ Redpanda Console responding" || echo "✗ Redpanda Console not ready"
 
 # Show service URLs
 urls:
 	@echo "Service URLs:"
 	@echo "  Deephaven:       http://localhost:10000"
 	@echo "  QuestDB Web UI:  http://localhost:9000"
-	@echo "  Redpanda UI:     http://localhost:8080"
 	@echo ""
 	@echo "Database Connections:"
 	@echo "  QuestDB PostgreSQL: localhost:8812 (user=admin, pass=quest)"
 	@echo "  QuestDB ILP:        localhost:9009"
-	@echo "  Redpanda Kafka:     localhost:9092"

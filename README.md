@@ -20,22 +20,26 @@ docker-compose up -d
 # Wait 30 seconds, then access:
 # - Deephaven: http://localhost:10000
 # - QuestDB:   http://localhost:9000
-# - Redpanda:  http://localhost:8080
 ```
 
 ## What This Does
 
-- **Cryptofeed** streams live trades/orderbooks from Coinbase and Kraken
-- **QuestDB** stores time-series data with WAL (Write-Ahead Log)
-- **Deephaven** provides real-time analytics and visualization
-- **Redpanda** (optional) provides Kafka-compatible message streaming
+- **Cryptofeed** streams live trades/orderbooks from Coinbase, Bitstamp, and Kraken
+- **QuestDB** stores time-series data with WAL (Write-Ahead Log) for efficient change tracking
+- **Deephaven** provides real-time analytics and visualization with <1 second latency
 
 ## Architecture
 
 ```
-Exchange APIs → Cryptofeed → QuestDB → Deephaven → Browser UI
-                              ↓
-                           Redpanda (Kafka)
+Crypto Exchanges (Coinbase, Bitstamp, Kraken)
+    ↓ WebSocket
+Cryptofeed
+    ↓ ILP (InfluxDB Line Protocol)
+QuestDB (WAL-enabled, time-series optimized)
+    ↓ PostgreSQL wire protocol + wal_transactions()
+Deephaven (TableDataService custom backend)
+    ↓
+Real-time Browser UI
 ```
 
 ## Documentation
