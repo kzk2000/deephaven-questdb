@@ -104,8 +104,16 @@ test:
 	@docker-compose ps
 	@echo ""
 	@echo "Testing connectivity..."
-	@docker exec questdb wget -qO- http://localhost:9000/exec?query=SELECT%20count%28%2A%29%20FROM%20trades 2>/dev/null | grep -q "count" && echo "✓ QuestDB responding" || echo "✗ QuestDB not ready"
+	@curl -s "http://localhost:9000/exec?query=SELECT%20count%28%2A%29%20FROM%20trades" 2>/dev/null | grep -q "count" && echo "✓ QuestDB responding" || echo "✗ QuestDB not ready"
 	@curl -s http://localhost:10000 >/dev/null && echo "✓ Deephaven responding" || echo "✗ Deephaven not ready"
+	@echo ""
+	@echo "Testing tables..."
+	@curl -s "http://localhost:9000/exec?query=SELECT%20count%28%2A%29%20FROM%20trades" 2>/dev/null | grep -q "count" && echo "✓ trades table exists" || echo "✗ trades table not ready"
+	@curl -s "http://localhost:9000/exec?query=SELECT%20count%28%2A%29%20FROM%20orderbooks" 2>/dev/null | grep -q "count" && echo "✓ orderbooks table exists" || echo "✗ orderbooks table not ready"
+	@curl -s "http://localhost:9000/exec?query=SELECT%20count%28%2A%29%20FROM%20orderbooks_1s" 2>/dev/null | grep -q "count" && echo "✓ orderbooks_1s view exists" || echo "✗ orderbooks_1s view not ready"
+	@echo ""
+	@echo "Table row counts:"
+	@python3 -c "import sys; sys.path.insert(0, 'docker/cryptofeed/src'); from questdb_writer import QuestDBWriter; w = QuestDBWriter('localhost', verbose=False); r = w.execute_sql('SELECT count() FROM trades'); print(f\"  trades:        {r['dataset'][0][0]:>6} rows\"); r = w.execute_sql('SELECT count() FROM orderbooks'); print(f\"  orderbooks:    {r['dataset'][0][0]:>6} rows\"); r = w.execute_sql('SELECT count() FROM orderbooks_1s'); print(f\"  orderbooks_1s: {r['dataset'][0][0]:>6} rows\"); w.close()" 2>/dev/null || echo "  (Python check failed)"
 
 # Show service URLs
 urls:

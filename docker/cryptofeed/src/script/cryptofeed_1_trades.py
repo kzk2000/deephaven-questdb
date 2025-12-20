@@ -10,7 +10,7 @@ from src.questdb_writer import QuestDBWriter
 
 # Initialize QuestDB writer
 questdb_host = 'questdb' if os.environ.get('IS_DOCKER') else '127.0.0.1'
-questdb_writer = QuestDBWriter(host=questdb_host, port=9009)
+questdb_writer = QuestDBWriter(host=questdb_host)
 
 
 async def write_to_questdb(data, receipt_timestamp):

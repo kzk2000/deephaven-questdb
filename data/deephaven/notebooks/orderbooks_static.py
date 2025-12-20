@@ -4,7 +4,7 @@ Deephaven notebook: Real-time Orderbooks from QuestDB
 This notebook reads orderbook data from QuestDB materialized view 
 (1-second snapshots) and creates Deephaven tables for analysis.
 
-Data source: orderbooks_compact_1s (materialized view with 1s sampling)
+Data source: orderbooks_1s (materialized view with 1s sampling)
 
 Tables created:
 - orderbooks: Latest orderbook snapshots (1-second resolution)

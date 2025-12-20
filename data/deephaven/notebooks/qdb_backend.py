@@ -33,6 +33,7 @@ import qdb
 import threading
 import time
 from abc import ABC
+from deephaven.liveness_scope import LivenessScope
 
 
 # =============================================================================
@@ -623,8 +624,13 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
 #  Convenience Functions
 # =============================================================================
 
+# =============================================================================
+#  Convenience Functions
+# =============================================================================
+
 def create_live_table(table_name: str, order_by_col: str = DEFAULT_ORDER_BY_COL, 
-                     page_size: int = DEFAULT_PAGE_SIZE, refreshing: bool = True, verbose: bool = False):
+                     page_size: int = DEFAULT_PAGE_SIZE, refreshing: bool = True, verbose: bool = False,
+                     use_liveness_scope: bool = True):
     """
     Create a live Deephaven table backed by QuestDB.
     
@@ -634,6 +640,7 @@ def create_live_table(table_name: str, order_by_col: str = DEFAULT_ORDER_BY_COL,
         page_size: Page size for Deephaven (default: 64,000)
         refreshing: Whether to enable live updates (default: True)
         verbose: Enable verbose logging of transaction updates (default: False)
+        use_liveness_scope: Whether to wrap table creation in LivenessScope (default: True)
     
     Returns:
         Deephaven table object
@@ -641,6 +648,7 @@ def create_live_table(table_name: str, order_by_col: str = DEFAULT_ORDER_BY_COL,
     Example:
         trades = create_live_table('trades')
         trades = create_live_table('trades', verbose=True)  # With detailed logs
+        trades = create_live_table('trades', use_liveness_scope=False)  # No scope management
     """
     backend = QuestDBBackend.get_or_create(
         table_name=table_name,
@@ -651,7 +659,15 @@ def create_live_table(table_name: str, order_by_col: str = DEFAULT_ORDER_BY_COL,
     tds = TableDataService(backend=backend, page_size=page_size)
     table_key = QuestDBTableKey(table_name)
     
-    return tds.make_table(table_key, refreshing=refreshing)
+    if use_liveness_scope:
+        # Create table within LivenessScope for proper lifecycle management
+        scope = LivenessScope()
+        with scope.open():
+            t = tds.make_table(table_key, refreshing=refreshing)
+        return t
+    else:
+        # Create table without LivenessScope (for backward compatibility)
+        return tds.make_table(table_key, refreshing=refreshing)
 
 
 def set_verbose(table_name: str, verbose: bool):
