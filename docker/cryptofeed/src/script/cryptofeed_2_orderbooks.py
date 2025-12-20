@@ -1,46 +1,52 @@
 import asyncio
 import os
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from cryptofeed import FeedHandler
 from cryptofeed.defines import L2_BOOK
 from cryptofeed.exchanges import Coinbase, Kraken, Bitstamp
 
-import src.cryptofeed_tools as cft
-from src.questdb_writer import QuestDBWriter
+import cryptofeed_tools as cft
+from questdb_writer import QuestDBWriter
 
 
 # Initialize QuestDB writer (global for all callbacks)
 questdb_host = 'questdb' if os.environ.get('IS_DOCKER') else '127.0.0.1'
-questdb_writer = QuestDBWriter(host=questdb_host, port=9009)
+questdb_writer = QuestDBWriter(host=questdb_host)
 
 # Orderbook depth configuration
-ORDERBOOK_DEPTH = 10
-SNAPSHOT_INTERVAL = 100  # Send snapshot every 100 updates (reduced for testing)
+# Limit to 20 levels to avoid huge data from exchanges like Coinbase
+ORDERBOOK_DEPTH = 20  # Set to integer to limit, None for full depth
 
 
-async def write_to_questdb(book, receipt_timestamp):
+async def write_to_questdb_compact(book, receipt_timestamp):
     """
     Callback to write orderbook snapshots to QuestDB
     """
     try:
         questdb_writer.write_orderbook(book, receipt_timestamp, depth=ORDERBOOK_DEPTH)
     except Exception as e:
-        print(f"Error in orderbook callback: {e}")
+        print(f"Error in compact orderbook callback: {e}")
 
 
 def main():
-    callbacks = {L2_BOOK: [write_to_questdb, cft.my_print]}
+    callbacks = {L2_BOOK: [write_to_questdb_compact, cft.my_print]}
     
-    # cft.SYMBOLS = ['BTC-USD']   # for testing
+    # Use BTC-USD only for testing compact format
+    test_symbols = ['BTC-USD']
     
     f = FeedHandler()
-    # Using snapshots_only=True and snapshot_interval to reduce data volume
-    # snapshot_interval is in number of updates between snapshots
-    f.add_feed(Coinbase(max_depth=2000, channels=[L2_BOOK], symbols=cft.SYMBOLS, 
-                       callbacks=callbacks, snapshot_interval=SNAPSHOT_INTERVAL, snapshots_only=True))
-    f.add_feed(Bitstamp(channels=[L2_BOOK], symbols=cft.SYMBOLS, 
-                       callbacks=callbacks, snapshot_interval=SNAPSHOT_INTERVAL, snapshots_only=True))
-    f.add_feed(Kraken(channels=[L2_BOOK], symbols=cft.SYMBOLS, 
-                     callbacks=callbacks, snapshot_interval=SNAPSHOT_INTERVAL, snapshots_only=True))
+    # Using snapshots_only=True and snapshot_interval to control data volume
+    # For testing, using lower interval to see data quickly
+    f.add_feed(Coinbase(max_depth=2000, channels=[L2_BOOK], symbols=test_symbols, 
+                       callbacks=callbacks, snapshot_interval=100, snapshots_only=True))
+    f.add_feed(Bitstamp(channels=[L2_BOOK], symbols=test_symbols, 
+                       callbacks=callbacks, snapshot_interval=100, snapshots_only=True))
+    f.add_feed(Kraken(channels=[L2_BOOK], symbols=test_symbols, 
+                     callbacks=callbacks, snapshot_interval=100, snapshots_only=True))
     
     # Fix for Python 3.10+ asyncio event loop issue
     try:

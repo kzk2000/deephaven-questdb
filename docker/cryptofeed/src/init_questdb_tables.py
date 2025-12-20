@@ -8,27 +8,32 @@ import sys
 
 
 def execute_sql(host, port, sql):
-    """Execute SQL via Postgres SQL wire protocol on port 8812"""
+    """Execute SQL via QuestDB HTTP REST API"""
     import urllib.request
     import json
+    import urllib.parse
     
     # Use HTTP REST API
-    url = f"http://{host}:9000/exec"
+    url = f"http://{host}:{port}/exec"
     params = urllib.parse.urlencode({'query': sql})
     full_url = f"{url}?{params}"
     
     try:
         with urllib.request.urlopen(full_url) as response:
-            result = json.loads(response.read().decode())
+            result_text = response.read().decode()
+            if result_text.strip() == '':
+                # Empty response likely means successful DDL with no result
+                return {'ddl': 'OK'}
+            result = json.loads(result_text)
             return result
     except Exception as e:
         print(f"Error executing SQL: {e}")
         return None
 
 
-def init_tables(host='questdb', http_port=9000, wait_for_db=True, max_retries=30):
+def init_tables(host='localhost', http_port=9000, wait_for_db=True, max_retries=30):
     """
-    Initialize QuestDB tables with TTL settings
+    Initialize QuestDB tables with proper schema, TTL settings, and materialized views
     
     Args:
         host: QuestDB hostname (default: 'questdb' for Docker)
@@ -55,93 +60,124 @@ def init_tables(host='questdb', http_port=9000, wait_for_db=True, max_retries=30
     
     print("\n📊 Initializing QuestDB tables...")
     
-    # Configuration for tables
-    tables_config = {
-        'trades': {
-            'ttl': None,  # Keep trades indefinitely
-            'partition': 'DAY',
-            'check_sql': "SELECT name FROM tables() WHERE name = 'trades'"
-        },
-        'orderbooks': {
-            'ttl': '1 HOURS',  # Keep only last hour of expanded format
-            'partition': 'HOUR',
-            'check_sql': "SELECT name FROM tables() WHERE name = 'orderbooks'"
-        },
-        'orderbooks_compact': {
-            'ttl': '1 HOURS',  # Keep only last hour of json list snapshots
-            'partition': 'HOUR',
-            'check_sql': "SELECT name FROM tables() WHERE name = 'orderbooks_compact'"
-        }
-    }
-    
-    for table_name, config in tables_config.items():
-        print(f"\n  Checking table: {table_name}")
-        
-        # Check if table exists
-        result = execute_sql(host, http_port, config['check_sql'])
-        
-        if result and 'dataset' in result and result['dataset']:
-            print(f"    ✅ Table exists")
-            
-            # Update TTL if specified
-            if config['ttl']:
-                print(f"    Configuring TTL: {config['ttl']}")
-                ttl_sql = f"ALTER TABLE {table_name} SET TTL {config['ttl']}"
-                result = execute_sql(host, http_port, ttl_sql)
-                
-                if result and result.get('ddl') == 'OK':
-                    print(f"    ✅ TTL set to {config['ttl']}")
-                elif result and 'error' in result:
-                    # TTL might already be set or other issue
-                    if 'already' in result['error'].lower() or 'same' in result['error'].lower():
-                        print(f"    ℹ️  TTL already configured")
-                    else:
-                        print(f"    ⚠️  TTL warning: {result['error']}")
-                else:
-                    print(f"    ✅ TTL applied")
-        else:
-            print(f"    ℹ️  Table does not exist yet (will be auto-created on first write)")
-    
-    # Create materialized view if it doesn't exist
-    print(f"\n  Checking materialized view: orderbooks_compact_1s")
-    result = execute_sql(host, http_port, "SELECT view_name FROM materialized_views() WHERE view_name = 'orderbooks_compact_1s'")
-    
-    if result and 'dataset' in result and result['dataset']:
-        print(f"    ✅ Materialized view exists")
+    # Create trades table with proper crypto data types
+    print(f"  Creating table: trades")
+    trades_sql = """
+        CREATE TABLE trades (
+            timestamp TIMESTAMP,
+            exchange SYMBOL,
+            symbol SYMBOL,
+            price DOUBLE,
+            size DOUBLE,     
+            side SYMBOL
+        ) TIMESTAMP(timestamp) PARTITION BY DAY
+    """
+    result = execute_sql(host, http_port, trades_sql)
+    if result and result.get('ddl') == 'OK':
+        print(f"    ✅ trades table created successfully")
+    elif result and 'error' in result and 'TABLE' in result['error'] and 'exists' in result['error'].lower():
+        print(f"    ⚠️  Table already exists (expected during recreation)")
     else:
-        print(f"    Creating materialized view...")
-        mv_sql = """
-            CREATE MATERIALIZED VIEW orderbooks_compact_1s AS 
-            SELECT 
-                timestamp, 
-                exchange, 
-                symbol, 
-                last(bids) AS bids, 
-                last(asks) AS asks 
-            FROM orderbooks_compact 
-            SAMPLE BY 1s
-        """
-        result = execute_sql(host, http_port, mv_sql)
-        
-        if result and result.get('ddl') == 'OK':
-            print(f"    ✅ Materialized view created")
-        elif result and 'error' in result:
-            if 'already exists' in result['error'].lower():
-                print(f"    ℹ️  Materialized view already exists")
-            else:
-                print(f"    ❌ Error creating view: {result['error']}")
-        else:
-            print(f"    ✅ Materialized view created")
+        print(f"    ⚠️  Warning: {'Unknown error' if result is None else result.get('error', 'Unknown error')}")
+    
+    # Create orderbooks table with QuestDB double arrays for efficient storage
+    # SDK v3.0.0+ supports 2D numpy arrays natively for DOUBLE[][] columns
+    print(f"  Creating table: orderbooks")
+    orderbooks_sql = """
+        CREATE TABLE IF NOT EXISTS orderbooks (
+            timestamp TIMESTAMP,
+            exchange SYMBOL,
+            symbol SYMBOL,
+            bids DOUBLE[][],  -- 2D array: [[prices...], [volumes...]]
+            asks DOUBLE[][]   -- 2D array: [[prices...], [volumes...]]
+        ) TIMESTAMP(timestamp) PARTITION BY HOUR
+    """
+    result = execute_sql(host, http_port, orderbooks_sql)
+    if result and (result.get('ddl') == 'OK' or result.get('dataset') is not None):
+        print(f"    ✅ orderbooks table created successfully")
+    elif result and 'error' in result and 'TABLE' in result['error'] and 'exists' in result['error'].lower():
+        print(f"    ✅ orderbooks table already exists")
+    else:
+        print(f"    ⚠️  Warning: {'Unknown error' if result is None else result.get('error', 'Unknown error')}")
+    
+    # Apply TTL to orderbooks (1 hour retention)
+    print(f"    Configuring TTL: orderbooks (1 HOURS)")
+    ttl_sql = "ALTER TABLE orderbooks SET TTL 1 HOURS"
+    result = execute_sql(host, http_port, ttl_sql)
+    if result and result.get('ddl') == 'OK':
+        print(f"    ✅ TTL set to 1 HOURS for orderbooks")
+    elif result and 'error' in result and 'already' in result['error'].lower():
+        print(f"    ✅ TTL already configured for orderbooks")
+    elif result and 'error' in result:
+        print(f"    ⚠️  TTL warning: {result['error']}")
+    else:
+        print(f"    ✅ TTL applied to orderbooks")
+    
+    # Create materialized view with IF NOT EXISTS
+    print(f"  Creating materialized view: orderbooks_1s")
+    mv_sql = """
+        CREATE MATERIALIZED VIEW IF NOT EXISTS orderbooks_1s AS 
+        SELECT 
+            timestamp, 
+            exchange, 
+            symbol, 
+            last(bids) AS bids, 
+            last(asks) AS asks 
+        FROM orderbooks 
+        SAMPLE BY 1s
+    """
+    result = execute_sql(host, http_port, mv_sql)
+    if result and result.get('ddl') == 'OK':
+        print(f"    ✅ Materialized view created successfully")
+    elif result and 'error' in result and 'VIEW' in result['error'] and 'exists' in result['error'].lower():
+        print(f"    ✅ Materialized view already exists")
+    elif result and 'error' in result:
+        print(f"    ❌ Error creating view: {result['error']}")
+    else:
+        print(f"    ✅ Materialized view created")
+    
+    # Verify schemas
+    print(f"\n  Verifying table schemas...")
+    
+    # Verify trades table schema
+    trades_schema_sql = "SELECT columns() FROM trades WHERE name='trades'"
+    result = execute_sql(host, http_port, trades_schema_sql)
+    if result and 'dataset' in result:
+        print(f"    ✅ trades table schema verified")
+        # Print key columns for verification
+        columns = result['dataset']
+        print(f"      Columns: {[col['name'] for col in columns]}")
+    
+    # Verify orderbooks table schema
+    ob_schema_sql = "SELECT columns() FROM orderbooks WHERE name='orderbooks'"
+    result = execute_sql(host, http_port, ob_schema_sql)
+    if result and 'dataset' in result:
+        print(f"    ✅ orderbooks table schema verified")
+        columns = result['dataset']
+        array_columns = [col['name'] for col in columns if 'DOUBLE[][]' in col['type']]
+        if array_columns:
+            print(f"      Array columns: {array_columns}")
+    
+    # Verify materialized view
+    mv_check_sql = "SELECT view_name FROM materialized_views() WHERE view_name = 'orderbooks_1s'"
+    result = execute_sql(host, http_port, mv_check_sql)
+    if result and 'dataset' in result and result['dataset']:
+        print(f"    ✅ materialized view orderbooks_1s verified")
     
     print("\n✅ QuestDB initialization complete!\n")
     
     # Print configuration summary
     print("📋 Table Configuration Summary:")
-    print(f"  {'Table':<25} {'Partition':<10} {'TTL':<15}")
-    print(f"  {'-'*25} {'-'*10} {'-'*15}")
-    for table_name, config in tables_config.items():
-        ttl_display = config['ttl'] if config['ttl'] else 'None'
-        print(f"  {table_name:<25} {config['partition']:<10} {ttl_display:<15}")
+    print(f"  {'Table':<25} {'Type':<25} {'Partition':<10} {'TTL':<15}")
+    print(f"  {'-'*25} {'-'*25} {'-'*10} {'-'*15}")
+    print(f"  {'trades':<25} {'price/size DOUBLE':<25} {'DAY':<10} {'None':<15}")
+    print(f"  {'orderbooks':<25} {'DOUBLE[][] Arrays':<25} {'HOUR':<10} {'1 HOURS':<15}")
+    print(f"  {'orderbooks_1s':<25} {'Materialized View':<25} {'N/A':<10} {'N/A':<15}")
+    print()
+    print("📊 Ready for crypto data ingestion!")
+    print("   - Trades table will store individual trade events")
+    print("   - Orderbooks table uses efficient double arrays for bid/ask data")
+    print("   - Materialized view provides 1-second sampled orderbook snapshots")
     print()
 
 
