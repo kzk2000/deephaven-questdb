@@ -17,11 +17,12 @@ make rebuild
 docker-compose build --no-cache
 docker-compose down  # Clean any stale containers
 docker-compose up -d
-
-# Wait 30 seconds, then access:
-# - Deephaven: http://localhost:10000
-# - QuestDB:   http://localhost:9000
 ```
+
+##### Wait 30 seconds, then access:
+- Deephaven: http://localhost:10000
+- QuestDB:   http://localhost:9000
+
 
 ## What This Does
 
