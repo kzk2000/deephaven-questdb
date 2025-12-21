@@ -26,7 +26,7 @@ trades_eth = trades.where("symbol == `ETH-USD`")
 trades_summary = trades.agg_by([
     agg.count_("TradeCount"),
     agg.avg("AvgPrice = price"),
-    agg.sum_("TotalVolume = amount"),
+    agg.sum_("TotalVolume = size"),
     agg.min_("MinPrice = price"),
     agg.max_("MaxPrice = price")
 ], by=["exchange", "symbol"])
