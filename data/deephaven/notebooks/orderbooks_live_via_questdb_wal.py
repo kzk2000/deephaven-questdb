@@ -12,7 +12,6 @@
 #   Or use: from qdb_backend import create_live_table
 
 from qdb_backend import create_live_table, stop_monitoring
-from deephaven.liveness_scope import LivenessScope
 
 # =============================================================================
 #  Configuration – EDIT THESE FOR YOUR ENV
@@ -26,16 +25,13 @@ PAGE_SIZE = 32_000  # Deephaven page size (smaller for orderbooks)
 # =============================================================================
 #  Create Live Table
 # =============================================================================
-
-# Create live table using the convenience function with proper LivenessScope management
-scope = LivenessScope()
-with scope.open():
-    orderbooks = create_live_table(
-        table_name=TARGET_TABLE_NAME,
-        order_by_col=ORDER_BY_COL,
-        page_size=PAGE_SIZE,
-        refreshing=True,
-    ).sort_descending(order_by=["timestamp"])
+orderbooks = create_live_table(
+    table_name=TARGET_TABLE_NAME,
+    order_by_col=ORDER_BY_COL,
+    page_size=PAGE_SIZE,
+    refreshing=True,
+    use_liveness_scope=True,
+).sort_descending(order_by=["timestamp"])
 
 # Add latency calculations
 orderbooks = orderbooks.update_view(

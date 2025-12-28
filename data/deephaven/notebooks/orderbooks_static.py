@@ -27,5 +27,5 @@ orderbooks = qdb.get_orderbooks(last_n=10)
 # Create filtered tables
 orderbooks_btc = orderbooks.where("symbol == `BTC-USD`")
 
-# Latest snapshot per exchange/symbol
+# Latest snapshot per exchange/symbol (doesn't render because of arrays)
 # orderbooks_latest = orderbooks.last_by(["exchange", "symbol"])
