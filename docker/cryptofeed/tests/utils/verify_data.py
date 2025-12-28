@@ -2,30 +2,32 @@
 """
 Verify QuestDB orderbook data format and content
 """
+
 import sys
 from pathlib import Path
 
 # Add src directory to path
-src_path = Path(__file__).parent.parent.parent / 'src'
+src_path = Path(__file__).parent.parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 from questdb_writer import QuestDBWriter
 
+
 def main():
-    writer = QuestDBWriter('localhost')
-    
+    writer = QuestDBWriter("localhost")
+
     print("📊 Querying orderbooks table...")
     print("=" * 100)
-    
+
     # Get total count
     result = writer.execute_sql("SELECT count() FROM orderbooks")
-    total = result['dataset'][0][0]
+    total = result["dataset"][0][0]
     print(f"\n✅ Total rows in orderbooks: {total:,}")
-    
+
     # Get latest 10 rows
     print("\n📋 Latest 10 rows:")
     print("-" * 100)
-    
+
     query = """
         SELECT timestamp, exchange, symbol, bids, asks
         FROM orderbooks 
@@ -33,13 +35,13 @@ def main():
         LIMIT 10
     """
     result = writer.execute_sql(query)
-    
-    for i, row in enumerate(result['dataset'], 1):
+
+    for i, row in enumerate(result["dataset"], 1):
         timestamp, exchange, symbol, bids, asks = row
-        
+
         print(f"\n{i}. {timestamp}")
         print(f"   Exchange: {exchange:10s} Symbol: {symbol:12s}")
-        
+
         if bids and len(bids) >= 2:
             print(f"   Bid levels:  {len(bids[0]):2d}  Ask levels:  {len(asks[0]):2d}")
             # Show top 3 bids
@@ -50,11 +52,12 @@ def main():
             print(f"   Volumes:    {asks[1][:3]}")
         else:
             print(f"   Empty orderbook")
-    
+
     print("\n" + "=" * 100)
     print("✅ Data verification complete!")
-    
+
     writer.close()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

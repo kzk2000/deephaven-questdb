@@ -13,27 +13,32 @@ Tables created:
 
 import qdb
 from deephaven import agg
+import importlib
 
-# Load recent trades from QuestDB
+importlib.reload(qdb)
+
+
 trades = qdb.get_trades(last_nticks=10)
 
-# Create filtered tables
-trades_btc = trades.where("symbol == `BTC-USD`")
-trades_eth = trades.where("symbol == `ETH-USD`")
+
+# # Create filtered tables
+# trades_btc = trades.where("symbol == `BTC-USD`")
+# trades_eth = trades.where("symbol == `ETH-USD`")
 
 
-# Create summary tables
-trades_summary = trades.agg_by([
-    agg.count_("TradeCount"),
-    agg.avg("AvgPrice = price"),
-    agg.sum_("TotalVolume = size"),
-    agg.min_("MinPrice = price"),
-    agg.max_("MaxPrice = price")
-], by=["exchange", "symbol"])
+# # Create summary tables
+# trades_summary = trades.agg_by(
+#     [
+#         agg.count_("TradeCount"),
+#         agg.avg("AvgPrice = price"),
+#         agg.sum_("TotalVolume = size"),
+#         agg.min_("MinPrice = price"),
+#         agg.max_("MaxPrice = price"),
+#     ],
+#     by=["exchange", "symbol"],
+# )
 
 
-# Get 1-minute candles from QuestDB
-candles_1m = qdb.get_candles(sample_by='1m', hours_ago=24)
-btc_1m = candles_1m.where("symbol == `BTC-USD`")
-
-
+# # Get 1-minute candles from QuestDB
+# candles_1m = qdb.get_candles(sample_by="1m")
+# btc_1m = candles_1m.where("symbol == `BTC-USD`")

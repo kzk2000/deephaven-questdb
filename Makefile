@@ -1,14 +1,15 @@
 # Makefile for Deephaven-QuestDB project
 
-.PHONY: help build up down clean rebuild logs ps test
+.PHONY: help build build_with_drop up down clean rebuild logs ps test
 
 help:
 	@echo "Deephaven-QuestDB Development Commands"
 	@echo ""
 	@echo "Setup:"
-	@echo "  make build     - Build all Docker images"
-	@echo "  make up        - Start all services"
-	@echo "  make rebuild   - Clean build and start (recommended for first setup)"
+	@echo "  make build            - Build all Docker images"
+	@echo "  make build_with_drop  - Drop QuestDB tables and build images"
+	@echo "  make up               - Start all services"
+	@echo "  make rebuild          - Clean build and start (recommended for first setup)"
 	@echo ""
 	@echo "Management:"
 	@echo "  make down      - Stop all services"
@@ -28,11 +29,22 @@ help:
 
 # Build all images
 build:
-	docker-compose build
+	docker compose build
+
+# Build with drop tables (drops QuestDB tables before building)
+build_with_drop:
+	@echo "Dropping QuestDB tables..."
+	@curl -s "http://localhost:9000/exec?query=DROP%20MATERIALIZED%20VIEW%20IF%20EXISTS%20orderbooks_1s" >/dev/null 2>&1 || true
+	@curl -s "http://localhost:9000/exec?query=DROP%20TABLE%20IF%20EXISTS%20orderbooks" >/dev/null 2>&1 || true
+	@curl -s "http://localhost:9000/exec?query=DROP%20TABLE%20IF%20EXISTS%20trades" >/dev/null 2>&1 || true
+	@echo "✓ Tables dropped"
+	@echo ""
+	@echo "Building images..."
+	docker compose build
 
 # Start all services
 up:
-	docker-compose up -d
+	docker compose up -d
 	@echo ""
 	@echo "✓ Services starting..."
 	@echo "  Wait 30 seconds for full startup"
@@ -43,18 +55,18 @@ up:
 
 # Stop all services
 down:
-	docker-compose down
+	docker compose down
 
 # Clean build and start (recommended for first setup)
 rebuild:
 	@echo "Stopping services..."
-	docker-compose down -v
+	docker compose down -v
 	@echo ""
 	@echo "Building images (this may take a few minutes)..."
-	docker-compose build --no-cache
+	docker compose build --no-cache
 	@echo ""
 	@echo "Starting services..."
-	docker-compose up -d
+	docker compose up -d
 	@echo ""
 	@echo "✓ Services starting..."
 	@echo "  Wait 30 seconds for full startup"
@@ -63,8 +75,8 @@ rebuild:
 
 # Restart all services
 restart:
-	docker-compose down
-	docker-compose up -d
+	docker compose down
+	docker compose up -d
 
 # Clean everything (removes data!)
 clean:
@@ -72,7 +84,7 @@ clean:
 	@read -p "Are you sure? [y/N] " -n 1 -r; \
 	echo; \
 	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		docker-compose down -v; \
+		docker compose down -v; \
 		echo "✓ All services and data removed"; \
 	else \
 		echo "Cancelled"; \
@@ -80,28 +92,28 @@ clean:
 
 # Show service status
 ps:
-	docker-compose ps
+	docker compose ps
 
 # Show all logs
 logs:
-	docker-compose logs --tail=50 -f
+	docker compose logs --tail=50 -f
 
 # Show Deephaven logs
 logs-dh:
-	docker-compose logs --tail=100 -f deephaven_qdb
+	docker compose logs --tail=100 -f deephaven_qdb
 
 # Show QuestDB logs
 logs-qdb:
-	docker-compose logs --tail=100 -f questdb
+	docker compose logs --tail=100 -f questdb
 
 # Show Cryptofeed logs
 logs-cf:
-	docker-compose logs --tail=100 -f cryptofeed
+	docker compose logs --tail=100 -f cryptofeed
 
 # Test service health
 test:
 	@echo "Checking service health..."
-	@docker-compose ps
+	@docker compose ps
 	@echo ""
 	@echo "Testing connectivity..."
 	@curl -s "http://localhost:9000/exec?query=SELECT%20count%28%2A%29%20FROM%20trades" 2>/dev/null | grep -q "count" && echo "✓ QuestDB responding" || echo "✗ QuestDB not ready"

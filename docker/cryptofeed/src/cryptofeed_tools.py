@@ -4,7 +4,7 @@ Centralized configuration for symbols and debug callbacks
 """
 
 # Symbols to subscribe to across all exchanges
-SYMBOLS = ['BTC-USD', 'ETH-USD', 'AVAX-USD', 'SOL-USD']
+SYMBOLS = ["BTC-USD", "ETH-USD", "AVAX-USD", "SOL-USD"]
 
 
 async def my_print(data, _receipt_time):

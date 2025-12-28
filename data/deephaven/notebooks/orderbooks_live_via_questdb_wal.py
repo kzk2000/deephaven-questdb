@@ -1,10 +1,9 @@
-
 # Live Orderbooks from QuestDB - Real-time Updates via WAL Monitoring
 #
 # This creates a Deephaven table backed by QuestDB storage with real-time updates
 # by monitoring QuestDB's WAL (Write-Ahead Log) for new rows.
 #
-# REQUIREMENTS: 
+# REQUIREMENTS:
 # 1. Patched Deephaven (run patch_all_callbacks.py first)
 # 2. QuestDB with orderbooks table receiving data
 #
@@ -20,8 +19,8 @@ from deephaven.liveness_scope import LivenessScope
 # =============================================================================
 
 TARGET_TABLE_NAME = "orderbooks"  # QuestDB table to stream
-ORDER_BY_COL = "timestamp"                # Order column (usually timestamp)
-PAGE_SIZE = 32_000                        # Deephaven page size (smaller for orderbooks)
+ORDER_BY_COL = "timestamp"  # Order column (usually timestamp)
+PAGE_SIZE = 32_000  # Deephaven page size (smaller for orderbooks)
 
 
 # =============================================================================
@@ -35,22 +34,25 @@ with scope.open():
         table_name=TARGET_TABLE_NAME,
         order_by_col=ORDER_BY_COL,
         page_size=PAGE_SIZE,
-        refreshing=True
-    ).sort_descending(order_by=['timestamp'])
+        refreshing=True,
+    ).sort_descending(order_by=["timestamp"])
 
 # Add latency calculations
-orderbooks = orderbooks.update_view([
-    'latency_seconds = diffNanos(timestamp, now()) / 1e9',
-])
+orderbooks = orderbooks.update_view(
+    [
+        "latency_seconds = diffNanos(timestamp, now()) / 1e9",
+    ]
+)
 
 if False:
     # Example: Toggle verbose mode
     from qdb_backend import set_verbose
-    set_verbose('orderbooks', True)   # Watch the logs!
+
+    set_verbose("orderbooks", True)  # Watch the logs!
     # ... wait a few seconds to see transactions ...
-    set_verbose('orderbooks', False)  # Quiet again
+    set_verbose("orderbooks", False)  # Quiet again
 
 
 if False:
-    # Stop orderbooks table from ticking
+    # Stop all tables from ticking
     stop_monitoring()

@@ -15,6 +15,11 @@ parts
 *.mo
 data/questdb/
 
+# Ai tools
+.playwright-mcp/
+.claude
+
 # QuestDB runtime data (created by container)
 data/questdb/*
 !data/questdb/.gitkeep
+
