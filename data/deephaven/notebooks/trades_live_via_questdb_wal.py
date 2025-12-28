@@ -12,7 +12,6 @@
 #   Or use: from qdb_backend import create_live_table
 
 from qdb_backend import create_live_table, stop_monitoring
-from deephaven.liveness_scope import LivenessScope
 
 # =============================================================================
 #  Configuration – EDIT THESE FOR YOUR ENV
