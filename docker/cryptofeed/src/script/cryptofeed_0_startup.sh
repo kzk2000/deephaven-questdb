@@ -4,6 +4,10 @@
 echo "Initializing QuestDB tables..."
 python /cryptofeed/src/init_questdb_tables.py questdb
 
+# Wait to ensure tables are fully initialized before ILP connections
+echo "Waiting for tables to be fully initialized..."
+sleep 2
+
 # Start the first process
 echo "Starting trades feed..."
 python /cryptofeed/src/script/cryptofeed_1_trades.py &

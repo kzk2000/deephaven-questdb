@@ -68,7 +68,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     # Create trades table with proper crypto data types
     print(f"  Creating table: trades")
     trades_sql = """
-        CREATE TABLE trades (
+        CREATE TABLE IF NOT EXISTS trades (
             timestamp TIMESTAMP_NS,
             exchange SYMBOL CAPACITY 256 CACHE,
             symbol SYMBOL CAPACITY 256 CACHE,
@@ -92,6 +92,28 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
         print(
             f"    ⚠️  Warning: {'Unknown error' if result is None else result.get('error', 'Unknown error')}"
         )
+
+    # Verify trades table has correct timestamp type
+    print(f"    Verifying trades table schema...")
+    verify_sql = "SHOW COLUMNS FROM trades"
+    result = execute_sql(host, http_port, verify_sql)
+    if result and "dataset" in result:
+        timestamp_col = next(
+            (col for col in result["dataset"] if col[0] == "timestamp"), None
+        )
+        if timestamp_col:
+            actual_type = timestamp_col[1]
+            if actual_type == "TIMESTAMP_NS":
+                print(
+                    f"    ✅ trades.timestamp has correct type: {actual_type} (nanosecond precision)"
+                )
+            else:
+                print(
+                    f"    ⚠️  WARNING: trades.timestamp has type {actual_type}, expected TIMESTAMP_NS"
+                )
+                print(
+                    f"       This may cause precision issues. Consider dropping and recreating."
+                )
 
     # Create orderbooks table with QuestDB double arrays for efficient storage
     # SDK v3.0.0+ supports 2D numpy arrays natively for DOUBLE[][] columns
@@ -119,6 +141,28 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
         print(
             f"    ⚠️  Warning: {'Unknown error' if result is None else result.get('error', 'Unknown error')}"
         )
+
+    # Verify orderbooks table has correct timestamp type
+    print(f"    Verifying orderbooks table schema...")
+    verify_sql = "SHOW COLUMNS FROM orderbooks"
+    result = execute_sql(host, http_port, verify_sql)
+    if result and "dataset" in result:
+        timestamp_col = next(
+            (col for col in result["dataset"] if col[0] == "timestamp"), None
+        )
+        if timestamp_col:
+            actual_type = timestamp_col[1]
+            if actual_type == "TIMESTAMP_NS":
+                print(
+                    f"    ✅ orderbooks.timestamp has correct type: {actual_type} (nanosecond precision)"
+                )
+            else:
+                print(
+                    f"    ⚠️  WARNING: orderbooks.timestamp has type {actual_type}, expected TIMESTAMP_NS"
+                )
+                print(
+                    f"       This may cause precision issues. Consider dropping and recreating."
+                )
 
     # Apply TTL to orderbooks (1 hour retention)
     print(f"    Configuring TTL: orderbooks (1 HOURS)")
