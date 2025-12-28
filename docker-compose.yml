@@ -43,7 +43,8 @@ services:
     build:
       context: docker/cryptofeed
     depends_on:
-      - questdb
+      questdb:
+        condition: service_healthy
     networks:
       - quest_ntw
 
