@@ -13,7 +13,9 @@ import os
 import sys
 import re
 
-FILE_PATH = "/opt/deephaven/venv/lib/python3.10/site-packages/deephaven/experimental/table_data_service.py"
+FILE_PATH = (
+    "/opt/deephaven/venv/lib/python3.10/site-packages/deephaven/experimental/table_data_service.py"
+)
 BACKUP_PATH = FILE_PATH + ".backup"
 
 
@@ -38,9 +40,7 @@ def patch_file():
     before_count = content.count("location_cb.apply")
     if before_count > 0:
         content = content.replace("location_cb.apply", "location_cb.accept")
-        patches.append(
-            f"location_cb.apply() -> location_cb.accept() ({before_count} occurrences)"
-        )
+        patches.append(f"location_cb.apply() -> location_cb.accept() ({before_count} occurrences)")
     else:
         patches.append("location_cb.accept() - already fixed")
 
@@ -58,9 +58,7 @@ def patch_file():
     matches = pattern2.findall(content)
     if matches:
         content = pattern2.sub(r"failure_cb.accept(\1)", content)
-        patches.append(
-            f"failure_cb(x) -> failure_cb.accept(x) ({len(matches)} occurrences)"
-        )
+        patches.append(f"failure_cb(x) -> failure_cb.accept(x) ({len(matches)} occurrences)")
 
     # 4. Fix size_cb(num) -> size_cb.accept(num) for LongConsumer
     pattern3 = re.compile(r"\bsize_cb\(([^)]+)\)")
@@ -76,18 +74,14 @@ def patch_file():
         matches = pattern4.findall(content)
         if matches:
             content = pattern4.sub(r"schema_cb.accept(\1)", content)
-            patches.append(
-                f"schema_cb(x) -> schema_cb.accept(x) ({len(matches)} occurrences)"
-            )
+            patches.append(f"schema_cb(x) -> schema_cb.accept(x) ({len(matches)} occurrences)")
 
     # 6. Fix values_cb(table) - Consumer
     pattern5 = re.compile(r"\bvalues_cb\(([^)]+)\)")
     matches = pattern5.findall(content)
     if matches:
         content = pattern5.sub(r"values_cb.accept(\1)", content)
-        patches.append(
-            f"values_cb(x) -> values_cb.accept(x) ({len(matches)} occurrences)"
-        )
+        patches.append(f"values_cb(x) -> values_cb.accept(x) ({len(matches)} occurrences)")
 
     if content == original:
         print("[WARN] No changes made")

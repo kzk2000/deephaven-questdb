@@ -22,9 +22,7 @@ def test_writer_verbose_mode():
 
 def test_writer_connection_attributes():
     """Test writer has correct connection attributes"""
-    writer = QuestDBWriter(
-        host="testhost", ilp_port=9999, http_port=8888, verbose=False
-    )
+    writer = QuestDBWriter(host="testhost", ilp_port=9999, http_port=8888, verbose=False)
 
     assert writer.host == "testhost"
     assert writer.ilp_port == 9999

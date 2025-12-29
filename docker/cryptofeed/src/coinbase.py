@@ -43,9 +43,7 @@ LOG = logging.getLogger("feedhandler")
 class Coinbase(Feed, CoinbaseRestMixin):
     id = COINBASE
     websocket_endpoints = [
-        WebsocketEndpoint(
-            "wss://ws-feed.exchange.coinbase.com", options={"compression": None}
-        )
+        WebsocketEndpoint("wss://ws-feed.exchange.coinbase.com", options={"compression": None})
     ]
     rest_endpoints = [
         RestEndpoint(
@@ -164,11 +162,7 @@ class Coinbase(Feed, CoinbaseRestMixin):
         pair = self.exchange_symbol_to_std_symbol(msg["product_id"])
         ts = self.timestamp_normalize(msg["time"])
 
-        if (
-            self.keep_l3_book
-            and "full" in self.subscription
-            and pair in self.subscription["full"]
-        ):
+        if self.keep_l3_book and "full" in self.subscription and pair in self.subscription["full"]:
             delta = {BID: [], ASK: []}
             price = Decimal(msg["price"])
             side = ASK if msg["side"] == "sell" else BID
@@ -254,10 +248,7 @@ class Coinbase(Feed, CoinbaseRestMixin):
         # the subsequent messages, causing a seq no mismatch.
         await asyncio.sleep(2)
 
-        urls = [
-            self.rest_endpoints[0].route("l3book", self.sandbox).format(pair)
-            for pair in pairs
-        ]
+        urls = [self.rest_endpoints[0].route("l3book", self.sandbox).format(pair) for pair in pairs]
 
         results = []
         for url in urls:
@@ -281,9 +272,7 @@ class Coinbase(Feed, CoinbaseRestMixin):
                     else:
                         self._l3_book[npair].book[side][price] = {order_id: size}
                     self.order_map[order_id] = (price, size)
-            await self.book_callback(
-                L3_BOOK, self._l3_book[npair], timestamp, raw=orders
-            )
+            await self.book_callback(L3_BOOK, self._l3_book[npair], timestamp, raw=orders)
 
     async def _open(self, msg: dict, timestamp: float):
         if not self.keep_l3_book:

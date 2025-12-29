@@ -1,0 +1,55 @@
+[project]
+name = "deephaven-questdb"
+version = "0.1.0"
+description = "Deephaven + QuestDB real-time streaming"
+requires-python = ">=3.10"
+authors = [
+    {name = "kzk2000"}
+]
+
+[project.optional-dependencies]
+# Note: ruff and pytest are run via uvx (no installation needed)
+# Install with: pip install -e ".[cryptofeed]" or pip install -e ".[deephaven]"
+
+cryptofeed = [
+    "cryptofeed==2.4.0",
+    "websockets==12.0",
+    "orjson==3.10.6",
+    "questdb[dataframe]==4.1.0",
+]
+
+deephaven = [
+    "questdb",
+    "polars",
+    "pyarrow",
+    "connectorx",
+    "websockets",
+    "orjson",
+    "seaborn",
+    "psycopg2-binary",
+    "sqlalchemy",
+    "adbc-driver-postgresql",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]  # pycodestyle errors, Pyflakes, isort
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["docker/cryptofeed/tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"

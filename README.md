@@ -47,13 +47,14 @@ Real-time Browser UI
 ## Common Commands
 
 ```bash
-make help       # Show all available commands
-make rebuild    # Clean rebuild (first time setup)
-make up         # Start services
-make down       # Stop services
-make ps         # Check status
-make logs       # View all logs
-make test       # Verify health
+make help             # Show all available commands
+make rebuild          # Clean rebuild (first time setup)
+make build_with_drop  # Clean rebuild + QuestDB table drop (to ensure QuestDB is setup properly, too!)
+make up               # Start services
+make down             # Stop services
+make ps               # Check status
+make logs             # View all logs
+make test             # Verify health
 ```
 
 ## Example Usage
@@ -79,7 +80,5 @@ candles = qdb.get_candles(sample_by='1m')
 - **[Known Issues](docs/DEEPHAVEN_BUG_REPORT.md)** - Deephaven WAL bug
 - **[Change History](docs/history/)** - Migration and refactoring logs
 
-## License
 
-MIT License - see LICENSE file for details
 

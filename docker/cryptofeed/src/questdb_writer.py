@@ -164,9 +164,7 @@ class QuestDBWriter:
                     bid_volumes.append(float(volume))
             else:
                 # Regular dict - sort descending
-                items = sorted(
-                    book.book.bids.items(), key=lambda x: x[0], reverse=True
-                )[:bid_depth]
+                items = sorted(book.book.bids.items(), key=lambda x: x[0], reverse=True)[:bid_depth]
                 bid_prices = [float(p) for p, _ in items]
                 bid_volumes = [float(v) for _, v in items]
 

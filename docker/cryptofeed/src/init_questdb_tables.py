@@ -58,9 +58,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
                     )
                     time.sleep(2)
                 else:
-                    print(
-                        f"❌ Failed to connect to QuestDB after {max_retries} attempts"
-                    )
+                    print(f"❌ Failed to connect to QuestDB after {max_retries} attempts")
                     sys.exit(1)
 
     print("\n📊 Initializing QuestDB tables...")
@@ -98,9 +96,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     verify_sql = "SHOW COLUMNS FROM trades"
     result = execute_sql(host, http_port, verify_sql)
     if result and "dataset" in result:
-        timestamp_col = next(
-            (col for col in result["dataset"] if col[0] == "timestamp"), None
-        )
+        timestamp_col = next((col for col in result["dataset"] if col[0] == "timestamp"), None)
         if timestamp_col:
             actual_type = timestamp_col[1]
             if actual_type == "TIMESTAMP_NS":
@@ -111,9 +107,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
                 print(
                     f"    ⚠️  WARNING: trades.timestamp has type {actual_type}, expected TIMESTAMP_NS"
                 )
-                print(
-                    f"       This may cause precision issues. Consider dropping and recreating."
-                )
+                print(f"       This may cause precision issues. Consider dropping and recreating.")
 
     # Create orderbooks table with QuestDB double arrays for efficient storage
     # SDK v3.0.0+ supports 2D numpy arrays natively for DOUBLE[][] columns
@@ -147,9 +141,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     verify_sql = "SHOW COLUMNS FROM orderbooks"
     result = execute_sql(host, http_port, verify_sql)
     if result and "dataset" in result:
-        timestamp_col = next(
-            (col for col in result["dataset"] if col[0] == "timestamp"), None
-        )
+        timestamp_col = next((col for col in result["dataset"] if col[0] == "timestamp"), None)
         if timestamp_col:
             actual_type = timestamp_col[1]
             if actual_type == "TIMESTAMP_NS":
@@ -160,9 +152,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
                 print(
                     f"    ⚠️  WARNING: orderbooks.timestamp has type {actual_type}, expected TIMESTAMP_NS"
                 )
-                print(
-                    f"       This may cause precision issues. Consider dropping and recreating."
-                )
+                print(f"       This may cause precision issues. Consider dropping and recreating.")
 
     # Apply TTL to orderbooks (1 hour retention)
     print(f"    Configuring TTL: orderbooks (1 HOURS)")
@@ -228,9 +218,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
             print(f"      Array columns: {array_columns}")
 
     # Verify materialized view
-    mv_check_sql = (
-        "SELECT view_name FROM materialized_views() WHERE view_name = 'orderbooks_1s'"
-    )
+    mv_check_sql = "SELECT view_name FROM materialized_views() WHERE view_name = 'orderbooks_1s'"
     result = execute_sql(host, http_port, mv_check_sql)
     if result and "dataset" in result and result["dataset"]:
         print(f"    ✅ materialized view orderbooks_1s verified")
@@ -242,9 +230,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     print(f"  {'Table':<25} {'Type':<25} {'Partition':<10} {'TTL':<15}")
     print(f"  {'-' * 25} {'-' * 25} {'-' * 10} {'-' * 15}")
     print(f"  {'trades':<25} {'price/size DOUBLE':<25} {'DAY':<10} {'None':<15}")
-    print(
-        f"  {'orderbooks':<25} {'DOUBLE[][] Arrays':<25} {'HOUR':<10} {'1 HOURS':<15}"
-    )
+    print(f"  {'orderbooks':<25} {'DOUBLE[][] Arrays':<25} {'HOUR':<10} {'1 HOURS':<15}")
     print(f"  {'orderbooks_1s':<25} {'Materialized View':<25} {'N/A':<10} {'N/A':<15}")
     print()
     print("📊 Ready for crypto data ingestion!")

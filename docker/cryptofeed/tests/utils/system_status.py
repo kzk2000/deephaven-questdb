@@ -58,21 +58,17 @@ def main():
 
     # 4. Wait and check growth
     print("\n4. GROWTH CHECK (waiting 10 seconds)...")
-    trades_before = writer.execute_sql("SELECT count() FROM trades").get(
-        "dataset", [[0]]
-    )[0][0]
-    orderbooks_before = writer.execute_sql("SELECT count() FROM orderbooks").get(
-        "dataset", [[0]]
-    )[0][0]
+    trades_before = writer.execute_sql("SELECT count() FROM trades").get("dataset", [[0]])[0][0]
+    orderbooks_before = writer.execute_sql("SELECT count() FROM orderbooks").get("dataset", [[0]])[
+        0
+    ][0]
 
     time.sleep(10)
 
-    trades_after = writer.execute_sql("SELECT count() FROM trades").get(
-        "dataset", [[0]]
-    )[0][0]
-    orderbooks_after = writer.execute_sql("SELECT count() FROM orderbooks").get(
-        "dataset", [[0]]
-    )[0][0]
+    trades_after = writer.execute_sql("SELECT count() FROM trades").get("dataset", [[0]])[0][0]
+    orderbooks_after = writer.execute_sql("SELECT count() FROM orderbooks").get("dataset", [[0]])[
+        0
+    ][0]
 
     trades_growth = trades_after - trades_before
     orderbooks_growth = orderbooks_after - orderbooks_before
