@@ -34,16 +34,10 @@ class MockBook:
             (object,),
             {
                 "bids": OrderedDict(
-                    {
-                        base_price - spread * (i + 1): random.uniform(0.1, 2.0)
-                        for i in range(20)
-                    }
+                    {base_price - spread * (i + 1): random.uniform(0.1, 2.0) for i in range(20)}
                 ),
                 "asks": OrderedDict(
-                    {
-                        base_price + spread * (i + 1): random.uniform(0.1, 2.0)
-                        for i in range(20)
-                    }
+                    {base_price + spread * (i + 1): random.uniform(0.1, 2.0) for i in range(20)}
                 ),
             },
         )()
@@ -107,9 +101,7 @@ def test_simulated_orderbook_feed():
     print(f"Growth: +{growth} rows")
 
     # Verify we got the expected updates
-    assert growth >= updates * 0.9, (
-        f"Expected at least {int(updates * 0.9)} new rows, got {growth}"
-    )
+    assert growth >= updates * 0.9, f"Expected at least {int(updates * 0.9)} new rows, got {growth}"
 
     # Show latest orderbooks per exchange/symbol
     print(f"\nLatest orderbooks:")

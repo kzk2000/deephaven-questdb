@@ -71,9 +71,7 @@ class QuestDBTableKey(TableKey):
         return hash(self.table_name)
 
     def __eq__(self, other):
-        return (
-            isinstance(other, QuestDBTableKey) and self.table_name == other.table_name
-        )
+        return isinstance(other, QuestDBTableKey) and self.table_name == other.table_name
 
     def __repr__(self):
         return f"QuestDBTableKey({self.table_name!r})"
@@ -89,10 +87,7 @@ class QuestDBTableLocationKey(TableLocationKey):
         return hash(self.location_id)
 
     def __eq__(self, other):
-        return (
-            isinstance(other, QuestDBTableLocationKey)
-            and self.location_id == other.location_id
-        )
+        return isinstance(other, QuestDBTableLocationKey) and self.location_id == other.location_id
 
     def __repr__(self):
         return f"QuestDBTableLocationKey({self.location_id!r})"
@@ -152,12 +147,8 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         threads_to_stop = []
         with self._lock:
             if self._active_threads:
-                print(
-                    f"[Backend] Cleaning up {len(self._active_threads)} active threads..."
-                )
-                for table_name, (stop_event, thread) in list(
-                    self._active_threads.items()
-                ):
+                print(f"[Backend] Cleaning up {len(self._active_threads)} active threads...")
+                for table_name, (stop_event, thread) in list(self._active_threads.items()):
                     stop_event.set()
                     threads_to_stop.append((table_name, thread))
                     print(f"[Backend] Signaled thread for '{table_name}' to stop")
@@ -167,9 +158,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         for table_name, thread in threads_to_stop:
             thread.join(timeout=2.0)
             if thread.is_alive():
-                print(
-                    f"[Backend] Warning: Thread for '{table_name}' didn't stop within 2 seconds"
-                )
+                print(f"[Backend] Warning: Thread for '{table_name}' didn't stop within 2 seconds")
             else:
                 print(f"[Backend] Thread for '{table_name}' stopped cleanly")
 
@@ -178,9 +167,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
             with _GLOBAL_BACKEND_LOCK:
                 if self._table_name in _GLOBAL_BACKENDS_BY_TABLE:
                     del _GLOBAL_BACKENDS_BY_TABLE[self._table_name]
-                    print(
-                        f"[Backend] Unregistered backend for table '{self._table_name}'"
-                    )
+                    print(f"[Backend] Unregistered backend for table '{self._table_name}'")
 
     @classmethod
     def get_or_create(
@@ -199,9 +186,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
                 return existing
             else:
                 print(f"[Backend] Creating new backend for table '{table_name}'...")
-                new_backend = cls(
-                    order_by_col=order_by_col, table_name=table_name, verbose=verbose
-                )
+                new_backend = cls(order_by_col=order_by_col, table_name=table_name, verbose=verbose)
                 _GLOBAL_BACKENDS_BY_TABLE[table_name] = new_backend
                 return new_backend
 
@@ -226,9 +211,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
                         f"[Backend] Cleaning up {len(instance._active_threads)} active threads for '{instance._table_name}'..."
                     )
                     threads_to_stop = []
-                    for table_name, (stop_event, thread) in list(
-                        instance._active_threads.items()
-                    ):
+                    for table_name, (stop_event, thread) in list(instance._active_threads.items()):
                         stop_event.set()
                         threads_to_stop.append((table_name, thread))
                         print(f"[Backend] Signaled thread for '{table_name}' to stop")
@@ -242,9 +225,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
                                 f"[Backend] Warning: Thread for '{table_name}' didn't stop within 2 seconds"
                             )
                         else:
-                            print(
-                                f"[Backend] Thread for '{table_name}' stopped cleanly"
-                            )
+                            print(f"[Backend] Thread for '{table_name}' stopped cleanly")
 
         if not _GLOBAL_BACKENDS_BY_TABLE:
             print(f"[Backend] All backends cleaned up successfully")
@@ -325,9 +306,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         except Exception as e:
             failure_cb(e)
 
-    def subscribe_to_table_locations(
-        self, table_key, location_cb, success_cb, failure_cb
-    ):
+    def subscribe_to_table_locations(self, table_key, location_cb, success_cb, failure_cb):
         """
         For refreshing tables, this should notify about new locations.
         Even with a single location, we might need to re-notify when data changes.
@@ -340,9 +319,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
             success_cb()
 
             if self._verbose:
-                print(
-                    f"[Backend] subscribe_to_table_locations called for '{table_key.table_name}'"
-                )
+                print(f"[Backend] subscribe_to_table_locations called for '{table_key.table_name}'")
 
             def unsubscribe():
                 if self._verbose:
@@ -478,9 +455,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
 
                                 # Check if rowCount is available
                                 row_counts = [
-                                    txn[1]
-                                    for txn in new_transactions
-                                    if txn[1] is not None
+                                    txn[1] for txn in new_transactions if txn[1] is not None
                                 ]
 
                                 if row_counts:
@@ -513,9 +488,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
                                 if self._verbose:
                                     import datetime
 
-                                    ts = datetime.datetime.now().strftime(
-                                        "%H:%M:%S.%f"
-                                    )[:-3]
+                                    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                                     print(
                                         f"[WAL Backend:{table_name}] [{ts}] Calling size_cb({current_size})"
                                     )
@@ -523,12 +496,8 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
                                 size_cb(current_size)
 
                                 if self._verbose:
-                                    ts = datetime.datetime.now().strftime(
-                                        "%H:%M:%S.%f"
-                                    )[:-3]
-                                    print(
-                                        f"[WAL Backend:{table_name}] [{ts}] size_cb returned"
-                                    )
+                                    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                                    print(f"[WAL Backend:{table_name}] [{ts}] size_cb returned")
                 else:
                     # Fallback to count(*) polling
                     current_size = self._get_table_size(table_name)
@@ -576,9 +545,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         if old_thread:
             old_thread.join(timeout=1.0)
             if old_thread.is_alive():
-                print(
-                    f"[WAL Backend] Warning: Old thread for '{table_name}' didn't stop cleanly"
-                )
+                print(f"[WAL Backend] Warning: Old thread for '{table_name}' didn't stop cleanly")
 
         # Create and start new thread
         stop_event = threading.Event()

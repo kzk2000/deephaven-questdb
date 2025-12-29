@@ -26,9 +26,7 @@ if rows:
         side = row[3]
         price = row[4]
         size = row[5]
-        print(
-            f"{symbol:12s} | {ts} | {exchange:10s} | {side:4s} | ${price:,.2f} x {size:.6f}"
-        )
+        print(f"{symbol:12s} | {ts} | {exchange:10s} | {side:4s} | ${price:,.2f} x {size:.6f}")
 else:
     print("No trades found!")
 
@@ -45,9 +43,7 @@ import polars as pl
 QUESTDB_URI = "redshift://admin:quest@localhost:8812/qdb"
 QUERY = "SELECT * FROM trades LIMIT 5;"
 
-df = pl.read_database_uri(query=QUERY, uri=QUESTDB_URI).to_pandas(
-    use_pyarrow_extension_array=True
-)
+df = pl.read_database_uri(query=QUERY, uri=QUESTDB_URI).to_pandas(use_pyarrow_extension_array=True)
 print("Received DataFrame:")
 print(df)
 

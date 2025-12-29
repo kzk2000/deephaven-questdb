@@ -41,9 +41,7 @@ def test_writer_initialization():
     writer1.close()
 
     # Custom ports
-    writer2 = QuestDBWriter(
-        host="localhost", ilp_port=9010, http_port=9001, verbose=False
-    )
+    writer2 = QuestDBWriter(host="localhost", ilp_port=9010, http_port=9001, verbose=False)
     assert writer2.ilp_port == 9010
     assert writer2.http_port == 9001
     writer2.close()

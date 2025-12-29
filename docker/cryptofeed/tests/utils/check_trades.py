@@ -35,9 +35,7 @@ def main():
             side = row[3]
             price = row[4]
             size = row[5]
-            print(
-                f"{symbol:12s} | {ts} | {exchange:10s} | {side:4s} | ${price:,.2f} x {size:.6f}"
-            )
+            print(f"{symbol:12s} | {ts} | {exchange:10s} | {side:4s} | ${price:,.2f} x {size:.6f}")
     else:
         print("No trades found!")
 

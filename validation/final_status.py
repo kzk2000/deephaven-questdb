@@ -3,6 +3,7 @@
 
 import sys
 
+
 sys.path.insert(0, "docker/cryptofeed/src")
 from questdb_writer import QuestDBWriter
 from datetime import datetime
@@ -32,9 +33,7 @@ result = writer.execute_sql("""
 rows = result.get("dataset", [])
 for row in rows[:4]:
     symbol, ts, exchange, side, price, size = row
-    print(
-        f"   {symbol:10s} | {ts} | {exchange:10s} | {side:4s} | ${price:>10,.2f} x {size:.6f}"
-    )
+    print(f"   {symbol:10s} | {ts} | {exchange:10s} | {side:4s} | ${price:>10,.2f} x {size:.6f}")
 
 # 3. Check latest orderbooks
 print("\n3. LATEST ORDERBOOKS (per symbol):")
@@ -51,21 +50,13 @@ for row in rows:
 
 # 4. Wait and check growth
 print("\n4. GROWTH CHECK (waiting 10 seconds)...")
-trades_before = writer.execute_sql("SELECT count() FROM trades").get("dataset", [[0]])[
-    0
-][0]
-orderbooks_before = writer.execute_sql("SELECT count() FROM orderbooks").get(
-    "dataset", [[0]]
-)[0][0]
+trades_before = writer.execute_sql("SELECT count() FROM trades").get("dataset", [[0]])[0][0]
+orderbooks_before = writer.execute_sql("SELECT count() FROM orderbooks").get("dataset", [[0]])[0][0]
 
 time.sleep(10)
 
-trades_after = writer.execute_sql("SELECT count() FROM trades").get("dataset", [[0]])[
-    0
-][0]
-orderbooks_after = writer.execute_sql("SELECT count() FROM orderbooks").get(
-    "dataset", [[0]]
-)[0][0]
+trades_after = writer.execute_sql("SELECT count() FROM trades").get("dataset", [[0]])[0][0]
+orderbooks_after = writer.execute_sql("SELECT count() FROM orderbooks").get("dataset", [[0]])[0][0]
 
 trades_growth = trades_after - trades_before
 orderbooks_growth = orderbooks_after - orderbooks_before

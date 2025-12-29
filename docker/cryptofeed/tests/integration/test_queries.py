@@ -52,9 +52,7 @@ def test_query_with_limit(writer):
 
 def test_query_with_aggregation(writer):
     """Test query with aggregation function"""
-    result = writer.execute_sql(
-        "SELECT symbol, count() as trade_count FROM trades GROUP BY symbol"
-    )
+    result = writer.execute_sql("SELECT symbol, count() as trade_count FROM trades GROUP BY symbol")
 
     assert result is not None
     assert "dataset" in result

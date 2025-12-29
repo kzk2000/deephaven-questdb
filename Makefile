@@ -1,6 +1,6 @@
 # Makefile for Deephaven-QuestDB project
 
-.PHONY: help build build_with_drop up down clean rebuild logs ps test
+.PHONY: help build build_with_drop up down clean rebuild logs ps test format
 
 help:
 	@echo "Deephaven-QuestDB Development Commands"
@@ -26,6 +26,9 @@ help:
 	@echo "Testing:"
 	@echo "  make test      - Verify all services are healthy"
 	@echo "  make urls      - Show all service URLs"
+	@echo ""
+	@echo "Development:"
+	@echo "  make format    - Format Python code with ruff"
 
 # Build all images
 build:
@@ -136,3 +139,7 @@ urls:
 	@echo "Database Connections:"
 	@echo "  QuestDB PostgreSQL: localhost:8812 (user=admin, pass=quest)"
 	@echo "  QuestDB ILP:        localhost:9009"
+
+# Format Python code with ruff (via uvx)
+format:
+	uvx ruff format --no-cache
