@@ -5,7 +5,6 @@ Welcome to the deephaven-questdb project documentation!
 ## Current Status
 
 - **[Current Status](CURRENT_STATUS.md)** - Latest system state, architecture, and metrics
-- **[Known Issues](DEEPHAVEN_BUG_REPORT.md)** - Deephaven WAL bug and workarounds
 
 ## Technical Documentation
 
@@ -49,7 +48,6 @@ docs/
 1. Check [CURRENT_STATUS.md](CURRENT_STATUS.md) for system overview
 2. Review [orderbooks.md](orderbooks.md) for technical details
 3. See [history/](history/) for change documentation
-4. Check [DEEPHAVEN_BUG_REPORT.md](DEEPHAVEN_BUG_REPORT.md) for known issues
 
 ## Contributing
 

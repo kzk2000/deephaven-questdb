@@ -67,9 +67,6 @@ See [history/2024-12-refactoring/](history/2024-12-refactoring/) for detailed re
 
 ## Known Issues
 
-### Deephaven WAL Bug
-See [DEEPHAVEN_BUG_REPORT.md](DEEPHAVEN_BUG_REPORT.md) for details on the WAL lag issue affecting real-time updates.
-
 **Workaround:** Using REST API queries instead of WAL for orderbooks.
 
 ## Testing
@@ -127,7 +124,6 @@ docker logs deephaven
 - [Orderbooks Guide](orderbooks.md) - How orderbooks work
 - [Verification Guide](verification/end-to-end-verification.md) - Testing procedures
 - [Change History](history/) - Migration and refactoring logs
-- [Known Issues](DEEPHAVEN_BUG_REPORT.md) - Deephaven WAL bug
 
 ## Next Steps
 

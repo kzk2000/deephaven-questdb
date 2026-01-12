@@ -77,7 +77,6 @@ candles = qdb.get_candles(sample_by='1m')
 - **[Main Documentation](docs/)** - Technical documentation and guides
 - **[Current Status](docs/CURRENT_STATUS.md)** - System architecture and status
 - **[Orderbooks Guide](docs/orderbooks.md)** - How orderbooks work
-- **[Known Issues](docs/DEEPHAVEN_BUG_REPORT.md)** - Deephaven WAL bug
 - **[Change History](docs/history/)** - Migration and refactoring logs
 
 
