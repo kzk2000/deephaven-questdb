@@ -12,7 +12,7 @@ import pytest
 notebooks = Path(__file__).parent.parent.parent.parent.parent / "data" / "deephaven" / "notebooks"
 sys.path.insert(0, str(notebooks))
 
-from qdb_prefix import StablePrefix, order_by, take_indices  # noqa: E402
+from qdb_prefix import StablePrefix, order_by, take_indices, tie_order  # noqa: E402
 
 S = 1_000_000_000  # ticks per second (ns)
 
@@ -236,3 +236,14 @@ def test_order_by_is_total():
         "exchange",
         "bids",
     ]
+
+
+def test_tie_order_sorts_only_runs_of_equal_keys():
+    keys = [(1, "a"), (2, "k"), (2, "k"), (2, "k"), (3, "a")]
+    books = ["x", "[3]", "[1]", "[2]", "y"]
+    assert tie_order(keys, lambda i: books[i]) == [0, 2, 3, 1, 4]
+    # the same rows fetched in another arrival order give the same sequence of books
+    other = [0, 3, 1, 2, 4]
+    perm = tie_order([keys[i] for i in other], lambda i: books[other[i]])
+    assert [books[other[i]] for i in perm] == ["x", "[1]", "[2]", "[3]", "y"]
+    assert tie_order([(1,), (2,)], lambda i: 0) is None

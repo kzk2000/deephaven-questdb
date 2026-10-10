@@ -192,13 +192,32 @@ def take_indices(ticks, bounds, counts):
     return out, extra, missing
 
 
+def tie_order(keys, tiebreak):
+    """Permutation that orders runs of equal `keys` (already sorted) by `tiebreak(i)`.
+
+    Returns None when no run has more than one row (nothing to reorder). Deterministic for a
+    given set of rows, which is all positional paging needs.
+    """
+    perm, n, i, changed = list(range(len(keys))), len(keys), 0, False
+    while i < n:
+        j = i + 1
+        while j < n and keys[j] == keys[i]:
+            j += 1
+        if j - i > 1:
+            perm[i:j] = sorted(range(i, j), key=tiebreak)
+            changed = True
+        i = j
+    return perm if changed else None
+
+
 def order_by(columns, upsert_keys, ts_column="timestamp", array_columns=()):
     """A total order for the table: timestamp, the upsert keys, then every other column.
 
     Many rows share a timestamp (QuestDB keeps them in arrival order, which differs between
     a row's first and a later read once out-of-order rows were merged in), so the timestamp
     alone does not fix positions. Rows that tie on every column are identical, so their
-    order does not matter. Array columns come last (the backend sorts them by their text).
+    order does not matter. Array columns come last (the backend breaks ties on them, see
+    tie_order).
     """
     keys = [ts_column] + [c for c in upsert_keys if c != ts_column]
     rest = [c for c in columns if c not in keys and c not in array_columns]

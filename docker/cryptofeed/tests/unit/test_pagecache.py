@@ -94,3 +94,22 @@ def test_different_pages_are_independent():
     a = cache.get(("t", 0, 10), 1, lambda: _page(3, tag=1))
     b = cache.get(("t", 10, 10), 1, lambda: _page(3, tag=2))
     assert a.column("price")[0].as_py() == 1.0 and b.column("price")[0].as_py() == 2.0
+
+
+def test_get_range_serves_any_covered_suffix_from_one_load():
+    cache = PageCache()
+    full = pa.table({"x": list(range(100, 150))})  # positions 100..149
+    loads = []
+
+    def loader():
+        loads.append(1)
+        return full
+
+    assert cache.get_range(100, 50, 64000, loader).num_rows == 50
+    part = cache.get_range(130, 10, 63970, loader)  # another column, filled up to 130
+    assert part.column("x").to_pylist() == list(range(130, 150))
+    assert cache.get_range(140, 5, 5, loader).column("x").to_pylist() == list(range(140, 145))
+    assert len(loads) == 1
+    # a request reaching past the cached rows (the page grew) loads again
+    cache.get_range(140, 20, 64000, lambda: pa.table({"x": list(range(140, 170))}))
+    assert cache.loads == 2

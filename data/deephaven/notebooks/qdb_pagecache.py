@@ -50,6 +50,31 @@ class PageCache:
                 self._entries.popitem(last=False)
             return page
 
+    def get_range(self, offset, min_rows, max_rows, loader):
+        """Rows [offset, offset + n) with min_rows <= n <= max_rows, from any cached page that
+        covers [offset, offset + min_rows), else from `loader()` (a page starting at offset).
+
+        Only valid when positions never change (qdb_prefix): Deephaven fills each column's
+        page from its own current length, so the columns of one page ask for different
+        offsets; serving them from one loaded range keeps that to one query.
+        """
+        with self._lock:
+            now = self._clock()
+            for start, (loaded_at, page) in reversed(self._entries.items()):
+                if now - loaded_at > self._ttl:
+                    continue
+                if start <= offset and offset + min_rows <= start + page.num_rows:
+                    self._entries.move_to_end(start)
+                    n = min(max_rows, start + page.num_rows - offset)
+                    return page.slice(offset - start, n)
+            page = loader()
+            self.loads += 1
+            self._entries[offset] = (self._clock(), page)
+            self._entries.move_to_end(offset)
+            while len(self._entries) > self._max:
+                self._entries.popitem(last=False)
+            return page
+
     def clear(self):
         with self._lock:
             self._entries.clear()

@@ -173,6 +173,25 @@ class _PgSource:
         pass
 
 
+def _row_bytes(column):
+    """i -> the raw bytes of row i of a (nested) list column: a cheap, total sort key."""
+    arr = column.combine_chunks()
+    levels = []
+    while pa.types.is_list(arr.type) or pa.types.is_large_list(arr.type):
+        levels.append(arr.offsets.to_numpy())
+        arr = arr.values
+    flat = arr.to_numpy(zero_copy_only=False)
+
+    def key(i):
+        lo, hi, shape = i, i + 1, []
+        for offsets in levels:
+            shape.append(offsets[lo + 1 : hi + 1] - offsets[lo:hi])
+            lo, hi = int(offsets[lo]), int(offsets[hi])
+        return b"".join(s.tobytes() for s in shape) + flat[lo:hi].tobytes()
+
+    return key
+
+
 # =============================================================================
 #  Backend
 # =============================================================================
@@ -284,10 +303,12 @@ class QuestDBBackend(TableDataServiceBackend):
         arrays = [c for c, typ, _ in cols if "[]" in typ]
         upsert = [c for c, _, key in cols if key]
         self._order = qdb_prefix.order_by([c for c, _, _ in cols], upsert, ts, arrays)
-        # array columns sort by their text, computed in ORDER BY only (never transferred)
-        self._order_sql = ", ".join(
-            f"cast({c} as varchar)" if c in arrays else c for c in self._order
-        )
+        # QuestDB sorts the scalar columns; rows that tie on all of them (Kraken books share
+        # timestamps) are ordered by their array values here: sorting by cast(bids as varchar)
+        # in SQL made a 32k-row orderbooks page ~5x slower
+        self._order_sql = ", ".join(c for c in self._order if c not in arrays)
+        self._tie_keys = [c for c in self._order if c not in arrays and c != ts]
+        self._tie_arrays = [c for c in self._order if c in arrays]
         schema = self._schema_for()
         self._select_sql = ", ".join(schema.names) + f", cast({ts} as long) __ticks"
 
@@ -438,6 +459,12 @@ class QuestDBBackend(TableDataServiceBackend):
         )
         fetched = self._source.table(sql, schema.append(pa.field("__ticks", pa.int64())))
         ticks = fetched.column("__ticks").to_pylist()
+        if self._tie_arrays and fetched.num_rows > 1:
+            keys = list(zip(ticks, *(fetched.column(c).to_pylist() for c in self._tie_keys)))
+            arrays = [_row_bytes(fetched.column(c)) for c in self._tie_arrays]
+            perm = qdb_prefix.tie_order(keys, lambda i: tuple(a(i) for a in arrays))
+            if perm is not None:
+                fetched = fetched.take(pa.array(perm, pa.int64()))
         idx, extra, missing = qdb_prefix.take_indices(ticks, bounds, counts)
         page = fetched.select(schema.names).take(pa.array(idx, pa.int64()))
         page = page.slice(offset - base, hi - offset)
@@ -465,8 +492,8 @@ class QuestDBBackend(TableDataServiceBackend):
     ):
         """Deephaven asks per column; all columns of a page come from one cached query."""
         try:
-            page = self._pages.get(
-                (offset, max_rows), min_rows, lambda: self._load_page(offset, max_rows)
+            page = self._pages.get_range(
+                offset, min_rows, max_rows, lambda: self._load_page(offset, max_rows)
             )
             values_cb(pa.table({col: page.column(col)}))
         except Exception as e:
