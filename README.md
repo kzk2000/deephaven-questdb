@@ -77,7 +77,7 @@ From Deephaven UI (http://localhost:10000):
 # Perps liquidity dashboard (see above)
 exec(open('/data/storage/notebooks/perps_dashboard.py').read())
 
-# Static snapshots (ConnectorX)
+# Static snapshots (QWP, Arrow)
 exec(open('/data/storage/notebooks/trades_static.py').read())
 
 # Live, ticking tables (TableDataService on QuestDB WAL)

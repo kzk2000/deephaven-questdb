@@ -43,7 +43,7 @@ Run `make test` for live row counts of `trades`, `orderbooks` and `orderbooks_1s
 
 - **Dashboard:** `notebooks/perps_dashboard.py` (widget `perps_dashboard`), built on `qdb_feed.feed_query` state tables over the views above; helpers and venue registry in `perps_dash_lib.py`
 - **Feeds:** `qdb_feed.py` (`feed_table`, `feed_query`) is the recommended way to get ticking tables; the positional TableDataService backend (`qdb_backend.py`) can glue columns of different rows together when rows arrive out of timestamp order
-- **Static:** `qdb.py` (ConnectorX over the Postgres wire)
+- **Static:** `qdb.py` (QWP, Arrow; ConnectorX over the Postgres wire as `transport="pg"`)
 
 ## Earlier Changes (December 2024)
 

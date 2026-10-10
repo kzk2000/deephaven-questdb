@@ -1,7 +1,13 @@
-import connectorx as cx
+import threading
+
 import deephaven.arrow as dhpa
 import pyarrow as pa
 import pyarrow.compute as pc
+
+# How run_query() reads QuestDB: "qwp" (Arrow over QuestDB's WebSocket protocol, the default;
+# see qdb_qwp.py) or "pg" (ConnectorX over the Postgres wire, the previous path). Override per
+# call (run_query(sql, transport="pg")) or globally by setting qdb.DEFAULT_TRANSPORT.
+DEFAULT_TRANSPORT = "qwp"
 
 
 def to_table(arrow_table):
@@ -59,8 +65,7 @@ _engine = None
 
 def get_connection():
     """
-    Returns the connection string for ConnectorX.
-    Used by static notebooks (trades_static.py, orderbooks_static.py).
+    Returns the connection string for ConnectorX (the transport="pg" path of run_query).
     """
     return _CONNECTORX_STRING
 
@@ -80,22 +85,51 @@ def get_engine():
     return _engine
 
 
-def run_query(query):
+_reader = None
+_reader_lock = threading.Lock()
+
+
+def _qwp_reader():
+    """Shared QWP connection (lazy; QwpReader serializes queries and reconnects once)."""
+    global _reader
+    with _reader_lock:
+        if _reader is None:
+            import qdb_qwp
+
+            _reader = qdb_qwp.QwpReader()
+        return _reader
+
+
+def _query_arrow(query, transport):
+    if transport == "qwp":
+        # nanosecond timestamps, SYMBOLs decoded to strings, nested arrays typed double[][]
+        import qdb_qwp
+
+        table = _qwp_reader().page_sql(query)
+        hinted = qdb_qwp.with_deephaven_hints(table.schema)
+        return table.cast(hinted) if hinted != table.schema else table
+    if transport == "pg":
+        import connectorx as cx  # only needed for the Postgres-wire path
+
+        return cx.read_sql(get_connection(), query, return_type="arrow")
+    raise ValueError(f"transport must be 'qwp' or 'pg', got {transport!r}")
+
+
+def run_query(query, transport=None):
     """
     Execute a SQL query and return a Deephaven table.
-    Uses connectorx to load to Arrow (most efficient),
-    then uses custom to_table() for proper timestamp conversion.
+
+    Reads Arrow from QuestDB over QWP by default (transport="pg" uses ConnectorX over the
+    Postgres wire), then uses custom to_table() for proper timestamp conversion.
 
     Args:
         query: SQL query string
+        transport: "qwp" or "pg"; defaults to qdb.DEFAULT_TRANSPORT
 
     Returns:
         Deephaven table
     """
-    conn_str = get_connection()
-    # ConnectorX loads directly to Arrow (most efficient format)
-    arrow_table = cx.read_sql(conn_str, query, return_type="arrow")
-    # Use custom to_table() that handles timestamp precision conversion
+    arrow_table = _query_arrow(query, transport or DEFAULT_TRANSPORT)
     return to_table(arrow_table)
 
 
