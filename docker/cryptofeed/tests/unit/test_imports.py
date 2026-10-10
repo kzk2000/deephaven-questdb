@@ -4,7 +4,6 @@ Test that all imports work correctly after unification
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 # Add src directory to path
 src_path = Path(__file__).parent.parent.parent / "src"
@@ -43,8 +42,7 @@ def test_writer_initialization():
     writer1.close()
 
     # Custom ports
-    with patch("questdb_writer.Sender"):  # SDK connects on enter; no server on 9010
-        writer2 = QuestDBWriter(host="localhost", ilp_port=9010, http_port=9001, verbose=False)
+    writer2 = QuestDBWriter(host="localhost", ilp_port=9010, http_port=9001, verbose=False)
     assert writer2.ilp_port == 9010
     assert writer2.http_port == 9001
     writer2.close()

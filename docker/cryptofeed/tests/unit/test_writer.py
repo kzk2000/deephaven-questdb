@@ -4,7 +4,6 @@ Unit tests for QuestDB writer basic functionality
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 # Add src directory to path
 src_path = Path(__file__).parent.parent.parent / "src"
@@ -23,9 +22,7 @@ def test_writer_verbose_mode():
 
 def test_writer_connection_attributes():
     """Test writer has correct connection attributes"""
-    # The SDK connects on enter; patch it so no server is needed
-    with patch("questdb_writer.Sender"):
-        writer = QuestDBWriter(host="testhost", ilp_port=9999, http_port=8888, verbose=False)
+    writer = QuestDBWriter(host="testhost", ilp_port=9999, http_port=8888, verbose=False)
 
     assert writer.host == "testhost"
     assert writer.ilp_port == 9999
