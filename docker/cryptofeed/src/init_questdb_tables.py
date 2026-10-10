@@ -3,16 +3,15 @@ Initialize QuestDB tables with proper TTL settings at startup.
 This script should be run before starting cryptofeed to ensure tables exist with correct configuration.
 """
 
-import socket
-import time
 import sys
+import time
 
 
 def execute_sql(host, port, sql):
     """Execute SQL via QuestDB HTTP REST API"""
-    import urllib.request
     import json
     import urllib.parse
+    import urllib.request
 
     # Use HTTP REST API
     url = f"http://{host}:{port}/exec"
@@ -51,7 +50,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
                 if result:
                     print("✅ QuestDB is ready!")
                     break
-            except Exception as e:
+            except Exception:
                 if attempt < max_retries - 1:
                     print(
                         f"  Attempt {attempt + 1}/{max_retries}: QuestDB not ready yet, waiting..."
@@ -64,7 +63,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     print("\n📊 Initializing QuestDB tables...")
 
     # Create trades table with proper crypto data types
-    print(f"  Creating table: trades")
+    print("  Creating table: trades")
     trades_sql = """
         CREATE TABLE IF NOT EXISTS trades (
             timestamp TIMESTAMP_NS,
@@ -78,21 +77,21 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     """
     result = execute_sql(host, http_port, trades_sql)
     if result and result.get("ddl") == "OK":
-        print(f"    ✅ trades table created successfully")
+        print("    ✅ trades table created successfully")
     elif (
         result
         and "error" in result
         and "TABLE" in result["error"]
         and "exists" in result["error"].lower()
     ):
-        print(f"    ⚠️  Table already exists (expected during recreation)")
+        print("    ⚠️  Table already exists (expected during recreation)")
     else:
         print(
             f"    ⚠️  Warning: {'Unknown error' if result is None else result.get('error', 'Unknown error')}"
         )
 
     # Verify trades table has correct timestamp type
-    print(f"    Verifying trades table schema...")
+    print("    Verifying trades table schema...")
     verify_sql = "SHOW COLUMNS FROM trades"
     result = execute_sql(host, http_port, verify_sql)
     if result and "dataset" in result:
@@ -107,11 +106,11 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
                 print(
                     f"    ⚠️  WARNING: trades.timestamp has type {actual_type}, expected TIMESTAMP_NS"
                 )
-                print(f"       This may cause precision issues. Consider dropping and recreating.")
+                print("       This may cause precision issues. Consider dropping and recreating.")
 
     # Create orderbooks table with QuestDB double arrays for efficient storage
     # SDK v3.0.0+ supports 2D numpy arrays natively for DOUBLE[][] columns
-    print(f"  Creating table: orderbooks")
+    print("  Creating table: orderbooks")
     orderbooks_sql = """
         CREATE TABLE IF NOT EXISTS orderbooks (
             timestamp TIMESTAMP_NS,
@@ -123,21 +122,21 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     """
     result = execute_sql(host, http_port, orderbooks_sql)
     if result and (result.get("ddl") == "OK" or result.get("dataset") is not None):
-        print(f"    ✅ orderbooks table created successfully")
+        print("    ✅ orderbooks table created successfully")
     elif (
         result
         and "error" in result
         and "TABLE" in result["error"]
         and "exists" in result["error"].lower()
     ):
-        print(f"    ✅ orderbooks table already exists")
+        print("    ✅ orderbooks table already exists")
     else:
         print(
             f"    ⚠️  Warning: {'Unknown error' if result is None else result.get('error', 'Unknown error')}"
         )
 
     # Verify orderbooks table has correct timestamp type
-    print(f"    Verifying orderbooks table schema...")
+    print("    Verifying orderbooks table schema...")
     verify_sql = "SHOW COLUMNS FROM orderbooks"
     result = execute_sql(host, http_port, verify_sql)
     if result and "dataset" in result:
@@ -152,23 +151,23 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
                 print(
                     f"    ⚠️  WARNING: orderbooks.timestamp has type {actual_type}, expected TIMESTAMP_NS"
                 )
-                print(f"       This may cause precision issues. Consider dropping and recreating.")
+                print("       This may cause precision issues. Consider dropping and recreating.")
 
     # Apply TTL to orderbooks (1 hour retention)
-    print(f"    Configuring TTL: orderbooks (1 HOURS)")
+    print("    Configuring TTL: orderbooks (1 HOURS)")
     ttl_sql = "ALTER TABLE orderbooks SET TTL 1 HOURS"
     result = execute_sql(host, http_port, ttl_sql)
     if result and result.get("ddl") == "OK":
-        print(f"    ✅ TTL set to 1 HOURS for orderbooks")
+        print("    ✅ TTL set to 1 HOURS for orderbooks")
     elif result and "error" in result and "already" in result["error"].lower():
-        print(f"    ✅ TTL already configured for orderbooks")
+        print("    ✅ TTL already configured for orderbooks")
     elif result and "error" in result:
         print(f"    ⚠️  TTL warning: {result['error']}")
     else:
-        print(f"    ✅ TTL applied to orderbooks")
+        print("    ✅ TTL applied to orderbooks")
 
     # Create materialized view with IF NOT EXISTS
-    print(f"  Creating materialized view: orderbooks_1s")
+    print("  Creating materialized view: orderbooks_1s")
     mv_sql = """
         CREATE MATERIALIZED VIEW IF NOT EXISTS orderbooks_1s AS 
         SELECT 
@@ -182,26 +181,26 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     """
     result = execute_sql(host, http_port, mv_sql)
     if result and result.get("ddl") == "OK":
-        print(f"    ✅ Materialized view created successfully")
+        print("    ✅ Materialized view created successfully")
     elif (
         result
         and "error" in result
         and "VIEW" in result["error"]
         and "exists" in result["error"].lower()
     ):
-        print(f"    ✅ Materialized view already exists")
+        print("    ✅ Materialized view already exists")
     elif result and "error" in result:
         print(f"    ❌ Error creating view: {result['error']}")
     else:
-        print(f"    ✅ Materialized view created")
+        print("    ✅ Materialized view created")
 
     # Verify schemas
-    print(f"\n  Verifying table schemas...")
+    print("\n  Verifying table schemas...")
 
     # Verify trades table schema
     result = execute_sql(host, http_port, "SELECT \"column\", type FROM table_columns('trades')")
     if result and result.get("dataset"):
-        print(f"    ✅ trades table schema verified")
+        print("    ✅ trades table schema verified")
         print(f"      Columns: {[col[0] for col in result['dataset']]}")
 
     # Verify orderbooks table schema
@@ -209,7 +208,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
         host, http_port, "SELECT \"column\", type FROM table_columns('orderbooks')"
     )
     if result and result.get("dataset"):
-        print(f"    ✅ orderbooks table schema verified")
+        print("    ✅ orderbooks table schema verified")
         array_columns = [col[0] for col in result["dataset"] if "[]" in col[1]]
         if array_columns:
             print(f"      Array columns: {array_columns}")
@@ -218,7 +217,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     mv_check_sql = "SELECT view_name FROM materialized_views() WHERE view_name = 'orderbooks_1s'"
     result = execute_sql(host, http_port, mv_check_sql)
     if result and "dataset" in result and result["dataset"]:
-        print(f"    ✅ materialized view orderbooks_1s verified")
+        print("    ✅ materialized view orderbooks_1s verified")
 
     print("\n✅ QuestDB initialization complete!\n")
 

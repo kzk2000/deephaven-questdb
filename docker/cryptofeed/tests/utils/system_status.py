@@ -4,8 +4,8 @@ Complete system status check - tables, data flow, growth
 """
 
 import sys
-from pathlib import Path
 import time
+from pathlib import Path
 
 # Add src directory to path
 src_path = Path(__file__).parent.parent.parent / "src"
@@ -82,10 +82,10 @@ def main():
 
     # 5. Summary
     print("\n5. UNIFIED WRITER STATUS:")
-    print(f"   ✓ Single import: from questdb_writer import QuestDBWriter")
-    print(f"   ✓ ILP protocol:  TCP port 9009 (trades)")
-    print(f"   ✓ REST API:      HTTP port 9000 (orderbooks, queries)")
-    print(f"   ✓ Legacy files:  DELETED")
+    print("   ✓ Single import: from questdb_writer import QuestDBWriter")
+    print("   ✓ ILP protocol:  HTTP port 9000 (trades and orderbooks)")
+    print("   ✓ REST API:      HTTP port 9000 (queries)")
+    print("   ✓ Legacy files:  DELETED")
 
     print("\n" + "=" * 100)
     if trades_growth > 0 and orderbooks_growth > 0:

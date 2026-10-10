@@ -5,13 +5,11 @@ import sys
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import cryptofeed_tools as cft
 from cryptofeed import FeedHandler
 from cryptofeed.defines import L2_BOOK
-from cryptofeed.exchanges import Coinbase, Kraken, Bitstamp
-
-import cryptofeed_tools as cft
+from cryptofeed.exchanges import Bitstamp, Coinbase, Kraken
 from questdb_writer import QuestDBWriter
-
 
 # Initialize QuestDB writer (global for all callbacks)
 questdb_host = "questdb" if os.environ.get("IS_DOCKER") else "127.0.0.1"

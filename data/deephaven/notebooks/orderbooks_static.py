@@ -16,8 +16,9 @@ Note: Uses JPY to convert Python lists to Java Double[][] arrays
 Each orderbook has bids/asks as 2D arrays: [[prices...], [volumes...]]
 """
 
-import qdb
 import importlib
+
+import qdb
 
 importlib.reload(qdb)
 

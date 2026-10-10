@@ -1,10 +1,11 @@
 # Current System Status
 
-**Last Updated:** December 20, 2024
+**Last Updated:** October 10, 2026
 
 ## Architecture Overview
 
 ### Data Ingestion
+- **Stack:** QuestDB 10.0.1, Deephaven server-ui 42.6 (Python 3.12)
 - **SDK Version:** questdb[dataframe]==4.1.0 (official QuestDB Python client)
 - **Protocol:** ILP over HTTP (port 9000)
 - **Trades:** Pure SDK implementation via ILP
@@ -20,14 +21,16 @@
 
 ## Data Flow Status
 
-### Production Metrics
-- **Trades:** 36,000+ rows (growing at ~8-20/sec)
-- **Orderbooks:** 342,000+ rows (growing at ~47-120/sec)
-- **Orderbooks 1s View:** 14,000+ rows (1-second sampled snapshots)
-- **Both processes:** Running smoothly without errors
+### Row counts
+Run `make test` for live row counts of `trades`, `orderbooks` and `orderbooks_1s`.
+
+### Retention
+- `trades`: kept (partitioned by day)
+- `orderbooks`: partitioned by hour, `TTL 1 HOURS`
+- `orderbooks_1s`: materialized view (1-second samples), kept
 
 ### Services
-- ✅ **QuestDB:** Healthy (ports 8812, 9000, 9009)
+- ✅ **QuestDB:** Healthy (ports 8812 and 9000 in use; 9009 TCP ILP is exposed but unused)
 - ✅ **Deephaven:** Healthy (port 10000)
 - ✅ **Cryptofeed:** Running (trades + orderbooks processes)
 
@@ -67,7 +70,10 @@ See [history/2024-12-refactoring/](history/2024-12-refactoring/) for detailed re
 
 ## Known Issues
 
-**Workaround:** Using REST API queries instead of WAL for orderbooks.
+### Deephaven `TableDataService` bug (fixed)
+
+### TradingView plugin
+`deephaven-plugin-tradingview-lightweight` is alpha (0.0.1). It has no `tvl.legend`, and its `auto_bin` stretched the candle price axis, so `trades_chart_live.py` bins candles with `agg_by`.
 
 ## Testing
 
@@ -82,26 +88,25 @@ docker/cryptofeed/tests/
 
 ### Running Tests
 ```bash
-make test                    # Quick status check
-cd docker/cryptofeed/tests
-./run_tests.sh              # Full test suite
+make test                    # Quick status check (services, tables, row counts)
+uvx --with numpy --with "questdb[dataframe]" --with pandas pytest docker/cryptofeed/tests
 ```
 
 See [../docker/cryptofeed/tests/TESTING.md](../docker/cryptofeed/tests/TESTING.md) for test documentation.
 
-## Validation Scripts
+## Utility Scripts
 
-Located in `validation/` directory:
+Located in `docker/cryptofeed/tests/utils/`:
 - `check_trades.py` - Verify trade data integrity
 - `verify_data.py` - Check orderbook data structure
-- `final_status.py` - System status summary
+- `system_status.py` - System status summary
 
 ## Quick Reference
 
 ### Start/Stop Services
 ```bash
-make start      # Start all services
-make stop       # Stop all services
+make up         # Start all services
+make down       # Stop all services
 make restart    # Restart all services
 make test       # Quick health check
 ```
@@ -122,7 +127,7 @@ docker logs deephaven
 
 - [Main README](../README.md) - Project overview and setup
 - [Orderbooks Guide](orderbooks.md) - How orderbooks work
-- [Verification Guide](verification/end-to-end-verification.md) - Testing procedures
+- [End-to-end verification (Dec 2025 snapshot)](history/2025-12-end-to-end-verification.md)
 - [Change History](history/) - Migration and refactoring logs
 
 ## Next Steps

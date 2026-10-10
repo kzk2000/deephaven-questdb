@@ -11,11 +11,12 @@ Usage:
     writer.execute_sql("SELECT * FROM trades")  # Uses REST API
 """
 
-import numpy as np
-import urllib.request
-import urllib.parse
 import json
-from questdb.ingress import Sender, TimestampNanos, TimestampMicros
+import urllib.parse
+import urllib.request
+
+import numpy as np
+from questdb.ingress import Sender, TimestampNanos
 
 
 class QuestDBWriter:
@@ -68,7 +69,7 @@ class QuestDBWriter:
         self._sender.__enter__()
 
         if verbose:
-            print(f"QuestDB Writer (SDK) initialized:")
+            print("QuestDB Writer (SDK) initialized:")
             print(f"  ILP:  {protocol.upper()} {host}:{ilp_port}")
             print(f"  REST: HTTP {host}:{self.http_port} (queries)")
 

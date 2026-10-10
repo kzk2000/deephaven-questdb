@@ -1,12 +1,11 @@
-import os
 import asyncio
-from cryptofeed import FeedHandler
-from cryptofeed.defines import TRADES
-from cryptofeed.exchanges import Coinbase, Bitstamp, Kraken
+import os
 
 import src.cryptofeed_tools as cft
+from cryptofeed import FeedHandler
+from cryptofeed.defines import TRADES
+from cryptofeed.exchanges import Bitstamp, Coinbase, Kraken
 from src.questdb_writer import QuestDBWriter
-
 
 # Initialize QuestDB writer
 questdb_host = "questdb" if os.environ.get("IS_DOCKER") else "127.0.0.1"

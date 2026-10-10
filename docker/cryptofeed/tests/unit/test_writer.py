@@ -17,7 +17,7 @@ def test_writer_verbose_mode():
     """Test verbose mode can be disabled"""
     # This should not print anything
     writer = QuestDBWriter(host="localhost", verbose=False)
-    assert writer.verbose == False
+    assert writer.verbose is False
     writer.close()
 
 

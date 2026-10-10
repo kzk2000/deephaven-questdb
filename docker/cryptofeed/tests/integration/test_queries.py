@@ -4,6 +4,7 @@ Integration tests for SQL query execution via REST API
 
 import sys
 from pathlib import Path
+
 import pytest
 
 # Add src directory to path

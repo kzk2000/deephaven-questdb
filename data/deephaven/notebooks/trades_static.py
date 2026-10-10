@@ -11,10 +11,10 @@ Tables created:
 - candles_1m: 1-minute OHLCV candles
 """
 
+import importlib
+
 import qdb
 from deephaven import agg
-import deephaven.arrow as dhpa
-import importlib
 
 importlib.reload(qdb)
 

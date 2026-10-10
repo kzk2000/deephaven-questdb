@@ -84,7 +84,7 @@ from questdb_writer import QuestDBWriter
 def test_writer_initialization():
     writer = QuestDBWriter("localhost", verbose=False)
     assert writer.host == "localhost"
-    assert writer.ilp_port == 9009
+    assert writer.ilp_port == 9000  # HTTP ILP shares the REST port
     assert writer.http_port == 9000
     writer.close()
 ```

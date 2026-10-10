@@ -6,6 +6,7 @@ Requires QuestDB to be running on localhost:9000
 
 import sys
 from pathlib import Path
+
 import pytest
 
 # Add src directory to path
@@ -20,7 +21,7 @@ def test_write_orderbook_to_questdb(writer, mock_orderbook, wait_for_rows):
     # Write orderbook
     result = writer.write_orderbook(book, book.timestamp, depth=5)
 
-    assert result == True, "Orderbook write should succeed"
+    assert result is True, "Orderbook write should succeed"
 
     # Wait for data to be committed
     wait_for_rows(writer, writer.orderbooks_table)

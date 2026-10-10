@@ -1,19 +1,8 @@
-# Orderbook Array Ingestion - Fixed
+# Orderbooks
 
-## What Was Fixed
+## Data format
 
-The orderbooks table now correctly ingests orderbook data using QuestDB's `DOUBLE[][]` array format.
-
-### Issues Resolved
-
-1. **Missing data extraction**: Added code to extract bid/ask prices and volumes from the orderbook object
-2. **Duplicate else clause**: Removed redundant error handling code
-3. **DML response handling**: Added support for `{'dml': 'OK'}` responses from QuestDB INSERT statements
-4. **Import path issues**: Fixed module imports in cryptofeed_3_orderbooks_compact.py
-
-### Data Format
-
-The orderbooks_compact table stores orderbook snapshots in an efficient 2D array format:
+`orderbooks` stores one snapshot per row, with the book levels as QuestDB `DOUBLE[][]` arrays:
 
 ```
 bids: DOUBLE[][]  -- [[prices...], [volumes...]]
@@ -26,52 +15,33 @@ bids: [[50000.0, 49999.0, 49998.0], [1.5, 2.0, 1.0]]
 asks: [[50001.0, 50002.0, 50003.0], [1.2, 0.8, 2.5]]
 ```
 
+Rows are written by `QuestDBWriter.write_orderbook` (official SDK, ILP over HTTP, numpy arrays,
+top 20 levels by default).
+
+## Retention
+
+| Object | Partitioning | Retention |
+|---|---|---|
+| `orderbooks` | `PARTITION BY HOUR`, WAL | `TTL 1 HOURS` |
+| `orderbooks_1s` | materialized view, `SAMPLE BY 1s` | kept (downsampled history) |
+
+- QuestDB's smallest TTL unit is `HOURS`, and TTL must be a multiple of the partition size, so 1 hour
+  is the minimum for `orderbooks`. Because whole partitions expire, expect roughly 1-2 hours of
+  raw rows.
+- `init_questdb_tables.py` creates the table with these settings. A table created earlier with a
+  different partitioning must be dropped (together with `orderbooks_1s`) and recreated. Stop
+  cryptofeed first, otherwise ILP auto-creates the table with default settings.
+
+## Using the data
+
+- Static, 1-second snapshots: `qdb.get_orderbooks(last_n=...)` (reads `orderbooks_1s`)
+- Live, ticking: `orderbooks_live_via_questdb_wal.py` (binds `orderbooks`)
+
 ## Testing
 
-### 1. Verify Table Setup
 ```bash
-python3 docker/cryptofeed/src/init_questdb_tables.py localhost
+make test        # health check and row counts
+uvx --with numpy --with "questdb[dataframe]" --with pandas pytest docker/cryptofeed/tests
 ```
 
-### 2. Test Writer Directly
-```bash
-python3 test_orderbook_writer.py
-```
-
-### 3. Simulate Live Data
-```bash
-python3 test_live_simulation.py
-```
-
-### 4. Verify Data
-```bash
-python3 verify_data.py
-```
-
-### 5. SQL Verification
-Use the queries in `verify_orderbooks.sql` to check data in QuestDB console.
-
-## Files Modified
-
-1. `docker/cryptofeed/src/questdb_rest_writer.py`
-   - Added orderbook data extraction logic
-   - Fixed DML response handling
-   - Removed duplicate else clause
-
-2. `docker/cryptofeed/src/script/cryptofeed_2_orderbooks.py`
-   - Fixed import paths for module loading
-
-## Test Results
-
-✅ 62 test rows successfully written to orderbooks table
-✅ Data correctly formatted as DOUBLE[][] arrays
-✅ Bids and asks properly sorted (bids descending, asks ascending)
-✅ 20 price levels captured per side
-✅ Works with multiple exchanges (Coinbase, Kraken, Bitstamp)
-✅ Works with multiple symbols (BTC-USD, ETH-USD)
-
-## Next Steps
-
-To run with live data from exchanges, you'll need to fix the cryptofeed websockets compatibility issue (currently showing `TypeError: create_connection() got an unexpected keyword argument 'read_limit'`). This is a library compatibility issue between cryptofeed, websockets, and uvloop.
-
-For now, the orderbook writer is fully functional and tested with simulated data.
+The integration and simulation tests write to throwaway `test_*` tables, never to `orderbooks`.

@@ -9,7 +9,7 @@ Welcome to the deephaven-questdb project documentation!
 ## Technical Documentation
 
 - **[Orderbooks Implementation](orderbooks.md)** - How orderbooks work with 2D arrays
-- **[Verification Guide](verification/end-to-end-verification.md)** - Testing and validation procedures
+- **[End-to-end verification (Dec 2025 snapshot)](history/2025-12-end-to-end-verification.md)** - Historical verification record
 
 ## Change History
 
@@ -25,7 +25,7 @@ All changes are production-ready with zero breaking changes.
 
 - **[Main README](../README.md)** - Project overview and quick start
 - **[Tests](../docker/cryptofeed/tests/)** - Test suite documentation
-- **[Validation Scripts](../validation/)** - Data validation utilities
+- **[Utility scripts](../docker/cryptofeed/tests/utils/)** - Data validation and status utilities
 - **[Makefile](../Makefile)** - Common commands reference
 
 ## Structure
@@ -35,12 +35,11 @@ docs/
 ├── README.md                       # This file
 ├── CURRENT_STATUS.md               # System status and architecture
 ├── DEEPHAVEN_BUG_REPORT.md         # Known issues
-├── orderbooks.md                   # Technical guide
-├── history/                        # Change history
-│   ├── 2024-12-refactoring/       # Refactoring logs
-│   └── 2024-12-sdk-migration/     # SDK migration logs
-└── verification/                   # Testing documentation
-    └── end-to-end-verification.md
+├── orderbooks.md                   # Orderbook format and retention
+└── history/                        # Change history
+    ├── 2024-12-refactoring/       # Refactoring logs
+    ├── 2024-12-sdk-migration/     # SDK migration logs
+    └── 2025-12-end-to-end-verification.md
 ```
 
 ## Getting Help

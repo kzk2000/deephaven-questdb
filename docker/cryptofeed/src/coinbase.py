@@ -8,11 +8,9 @@ associated with this software.
 import asyncio
 import logging
 import time
+from collections import defaultdict
 from decimal import Decimal
 from typing import Dict, Tuple
-from collections import defaultdict
-
-from yapic import json
 
 from cryptofeed.connection import (
     AsyncConnection,
@@ -21,8 +19,8 @@ from cryptofeed.connection import (
     WebsocketEndpoint,
 )
 from cryptofeed.defines import (
-    BID,
     ASK,
+    BID,
     BUY,
     COINBASE,
     L2_BOOK,
@@ -31,11 +29,11 @@ from cryptofeed.defines import (
     TICKER,
     TRADES,
 )
+from cryptofeed.exchanges.mixins.coinbase_rest import CoinbaseRestMixin
 from cryptofeed.feed import Feed
 from cryptofeed.symbols import Symbol
-from cryptofeed.exchanges.mixins.coinbase_rest import CoinbaseRestMixin
 from cryptofeed.types import OrderBook, Ticker, Trade
-
+from yapic import json
 
 LOG = logging.getLogger("feedhandler")
 

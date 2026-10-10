@@ -12,8 +12,8 @@ Version: 1.0 (Working Demo)
 """
 
 import deephaven.ui as ui
-from qdb import get_trades
 from deephaven import agg
+from qdb import get_trades
 
 # =============================================================================
 # Configuration
@@ -99,7 +99,7 @@ def live_trades_viewer():
     return ui.flex(
         # Header
         ui.heading("Cryptocurrency Trades Viewer", level=1),
-        ui.text(f"Static snapshot from QuestDB (last 5000 trades)"),
+        ui.text("Static snapshot from QuestDB (last 5000 trades)"),
         ui.text(""),
         # Controls
         ui.view(

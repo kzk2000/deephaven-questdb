@@ -1,5 +1,5 @@
-import deephaven.arrow as dhpa
 import connectorx as cx
+import deephaven.arrow as dhpa
 import pyarrow as pa
 import pyarrow.compute as pc
 

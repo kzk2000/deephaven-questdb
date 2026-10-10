@@ -5,17 +5,15 @@ This simulates a live feed by generating multiple orderbooks
 and writing them to QuestDB in sequence.
 """
 
-import sys
-from pathlib import Path
-import time
 import random
+import sys
+import time
 from collections import OrderedDict
+from pathlib import Path
 
 # Add src directory to path
 src_path = Path(__file__).parent.parent.parent / "src"
 sys.path.insert(0, str(src_path))
-
-from questdb_writer import QuestDBWriter
 
 
 class MockBook:
@@ -64,7 +62,7 @@ def test_simulated_orderbook_feed(writer):
     print(f"\nInitial orderbook count: {initial_count}")
 
     # Simulate 30 orderbook updates (10 iterations, 3 exchanges)
-    print(f"\nSimulating orderbook feed...")
+    print("\nSimulating orderbook feed...")
     updates = 0
 
     for iteration in range(10):
@@ -106,7 +104,7 @@ def test_simulated_orderbook_feed(writer):
     assert growth >= updates * 0.9, f"Expected at least {int(updates * 0.9)} new rows, got {growth}"
 
     # Show latest orderbooks per exchange/symbol
-    print(f"\nLatest orderbooks:")
+    print("\nLatest orderbooks:")
     query = f"""
         SELECT exchange, symbol, timestamp
         FROM {table}

@@ -21,20 +21,19 @@ Usage:
     stop_monitoring()
 """
 
+import threading
+import time
+from abc import ABC
+
+import pyarrow as pa
+import qdb
 from deephaven.experimental.table_data_service import (
     TableDataService,
     TableDataServiceBackend,
     TableKey,
     TableLocationKey,
 )
-
-import pyarrow as pa
-import qdb
-import threading
-import time
-from abc import ABC
 from deephaven.liveness_scope import LivenessScope
-
 
 # =============================================================================
 #  Configuration
@@ -228,7 +227,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
                             print(f"[Backend] Thread for '{table_name}' stopped cleanly")
 
         if not _GLOBAL_BACKENDS_BY_TABLE:
-            print(f"[Backend] All backends cleaned up successfully")
+            print("[Backend] All backends cleaned up successfully")
 
     # -------------------------------------------------------------------------
     #  Schema
@@ -323,7 +322,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
 
             def unsubscribe():
                 if self._verbose:
-                    print(f"[Backend] Unsubscribed from table locations")
+                    print("[Backend] Unsubscribed from table locations")
                 return
 
             return unsubscribe

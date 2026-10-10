@@ -5,8 +5,9 @@ Requires QuestDB to be running on localhost:9000. Writes go to throwaway tables.
 """
 
 import sys
-from pathlib import Path
 import time
+from pathlib import Path
+
 import pytest
 
 # Add src directory to path

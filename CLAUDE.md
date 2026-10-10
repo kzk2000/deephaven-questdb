@@ -27,7 +27,7 @@ Exchanges -> cryptofeed -> ILP/HTTP (questdb:9000) -> QuestDB 10.0.1 (WAL tables
 - `data/deephaven/notebooks/qdb.py`: static access via ConnectorX (`redshift://...:8812`). `run_query`, `to_table()` (timestamp[us] -> timestamp[ns, tz=UTC], large_list -> list), `get_trades`, `get_candles`, `get_orderbooks`, `get_engine()` (SQLAlchemy, for live).
 - `notebooks/qdb_backend.py`: `QuestDBBackend(TableDataServiceBackend)`. One backend per table in a module-global registry (re-runnable notebooks). Polls `wal_transactions()` every 50ms, falls back to `count(*)`; pages with `ROW_NUMBER() OVER (ORDER BY timestamp)`. API: `create_live_table`, `set_verbose`, `stop_monitoring`.
 - Notebooks: static `trades_static.py` (binds `trades_static`), `orderbooks_static.py` (binds `orderbooks_static`); live notebooks bind `trades` / `orderbooks`; live `trades_live_via_questdb_wal.py`, `orderbooks_live_via_questdb_wal.py` (add `latency_seconds`); charts `trades_chart_live.py` (TradingView candles + volume, tick lines; `tvl` plugin 0.0.1 has no `tvl.legend`; candles are binned with `agg_by`, because plugin `auto_bin` produced a 0-based price axis), `trades_chart_simple.py`.
-- `validation/` ad-hoc checks; `docs/` status, orderbooks, bug report, `history/`; `docker/cryptofeed/tests/` unit/integration/simulation + `run_tests.sh`.
+- `docs/` status, orderbooks, bug report, `history/`; `docker/cryptofeed/tests/` unit/integration/simulation + `utils/` (status scripts) + `run_tests.sh`.
 
 ## How to run
 
@@ -44,4 +44,3 @@ Exchanges -> cryptofeed -> ILP/HTTP (questdb:9000) -> QuestDB 10.0.1 (WAL tables
 - **Two connection paths**: static notebooks use ConnectorX (`get_connection()` returns a string); live notebooks use SQLAlchemy via `get_engine()`. Mixing them gives `'str' has no attribute 'connect'`.
 - **Column naming**: cryptofeed's `amount` is stored as `size`.
 - **Backend performance**: each `column_values` call runs `ROW_NUMBER()` over the whole table and fetches the schema twice; slow on large tables.
-- **Leftover config**: app-mode configs (`data/deephaven/app.d/config.app`, `docker/deephaven/config/app.d/cryptofeed.app`, `init_app.py`) have all script entries commented out.

@@ -3,8 +3,8 @@ Test that all imports work correctly after unification
 """
 
 import sys
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 # Add src directory to path
 src_path = Path(__file__).parent.parent.parent / "src"

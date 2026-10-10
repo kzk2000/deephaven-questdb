@@ -29,6 +29,7 @@ deephaven = [
     "psycopg2-binary",
     "sqlalchemy",
     "adbc-driver-postgresql",
+    "deephaven-plugin-tradingview-lightweight==0.0.1",
 ]
 
 [build-system]
@@ -42,6 +43,8 @@ bypass-selection = true
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Python only: ruff would otherwise reformat code blocks in the markdown docs
+extend-exclude = ["*.md", "data/questdb"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -50,7 +53,12 @@ line-ending = "auto"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]  # pycodestyle errors, Pyflakes, isort
-ignore = []
+# E501: the formatter does not wrap long strings/docstrings, so line length is left to ruff format
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests put docker/cryptofeed/src on sys.path before importing the writer
+"docker/cryptofeed/tests/**" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["docker/cryptofeed/tests"]

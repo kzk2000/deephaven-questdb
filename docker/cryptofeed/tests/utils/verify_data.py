@@ -51,7 +51,7 @@ def main():
             print(f"   Top 3 asks: {asks[0][:3]}")
             print(f"   Volumes:    {asks[1][:3]}")
         else:
-            print(f"   Empty orderbook")
+            print("   Empty orderbook")
 
     print("\n" + "=" * 100)
     print("✅ Data verification complete!")

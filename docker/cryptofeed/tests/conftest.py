@@ -6,16 +6,18 @@ import sys
 import urllib.parse
 import urllib.request
 import uuid
-import pytest
 from pathlib import Path
+
+import pytest
 
 # Add src directory to path
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
-from questdb_writer import QuestDBWriter
-from collections import OrderedDict
 import time
+from collections import OrderedDict
+
+from questdb_writer import QuestDBWriter
 
 
 @pytest.fixture
