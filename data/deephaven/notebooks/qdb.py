@@ -51,7 +51,7 @@ def to_table(arrow_table):
 # Connection strings for QuestDB
 # ConnectorX uses 'redshift://' protocol, psycopg2/SQLAlchemy uses 'postgresql://'
 _CONNECTORX_STRING = "redshift://admin:quest@questdb:8812/qdb"
-_POSTGRES_STRING = "postgresql://admin:quest@questdb:8812/qdb"
+_POSTGRES_STRING = "postgresql+psycopg2://admin:quest@questdb:8812/qdb"
 
 # Lazy-initialized SQLAlchemy engine for qdb_backend.py
 _engine = None
