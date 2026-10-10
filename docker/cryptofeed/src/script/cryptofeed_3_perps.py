@@ -126,6 +126,48 @@ def _side_arrays(side):
     return prices, sizes
 
 
+def deep_book_callback(deep_books, n_sig_figs):
+    """Store an aggregated book (venue nSigFigs subscription) for the liquidity callback."""
+
+    async def on_book(book, receipt_timestamp):
+        bid_prices, bid_sizes = _side_arrays(book.book.bids)
+        ask_prices, ask_sizes = _side_arrays(book.book.asks)
+        deep_books.update(book.symbol, n_sig_figs, bid_prices, bid_sizes, ask_prices, ask_sizes)
+
+    return on_book
+
+
+def aggregated_feed_class(feed_class, n_sig_figs):
+    """A Hyperliquid feed subscribed to `nSigFigs` price-aggregated books.
+
+    The venue serves 20 levels per side whatever the aggregation, so coarser prices reach
+    further from the mid (BTC: ~2 bps raw, ~25 bps at 4 figures, ~250 bps at 3). cryptofeed
+    offers no way to pass the option, hence the subclass.
+    """
+    import json
+
+    class Aggregated(feed_class):
+        async def subscribe(self, conn):
+            self._reset()
+            for channel, symbols in conn.subscription.items():
+                for symbol in symbols:
+                    await conn.write(
+                        json.dumps(
+                            {
+                                "method": "subscribe",
+                                "subscription": {
+                                    "type": channel,
+                                    "coin": symbol,
+                                    "nSigFigs": n_sig_figs,
+                                },
+                            }
+                        )
+                    )
+
+    Aggregated.__name__ = f"{feed_class.__name__}Agg{n_sig_figs}"
+    return Aggregated
+
+
 def liquidity_callback(
     writer,
     specs,
@@ -133,6 +175,7 @@ def liquidity_callback(
     clock=time.monotonic,
     table="perps_liquidity",
     aliases=None,
+    deep_books=None,
 ):
     """Throttled spread / depth-within-N-bps / slippage metrics from the full in-memory book.
 
@@ -155,6 +198,10 @@ def liquidity_callback(
         try:
             bid_prices, bid_sizes = _side_arrays(book.book.bids)
             ask_prices, ask_sizes = _side_arrays(book.book.asks)
+            if deep_books is not None and len(bid_prices) and len(ask_prices):
+                bid_prices, bid_sizes, ask_prices, ask_sizes = deep_books.extend(
+                    book.symbol, bid_prices, bid_sizes, ask_prices, ask_sizes
+                )
             metrics = perps.compute_liquidity(
                 bid_prices,
                 spec.to_base_array(bid_prices, bid_sizes),
@@ -233,6 +280,15 @@ def main():
             continue
 
         symbols = list(specs)
+        deep_books = perps.DeepBooks() if venue.deep_sig_figs else None
+        for n_sig_figs in venue.deep_sig_figs:
+            handler.add_feed(
+                aggregated_feed_class(feed_class, n_sig_figs)(
+                    channels=[L2_BOOK],
+                    symbols=symbols,
+                    callbacks={L2_BOOK: [deep_book_callback(deep_books, n_sig_figs)]},
+                )
+            )
         handler.add_feed(
             feed_class(
                 channels=[TRADES],
@@ -248,7 +304,9 @@ def main():
                 callbacks={
                     L2_BOOK: [
                         book_callback(writer, specs, venue.aliases),
-                        liquidity_callback(writer, specs, aliases=venue.aliases),
+                        liquidity_callback(
+                            writer, specs, aliases=venue.aliases, deep_books=deep_books
+                        ),
                     ]
                 },
             )

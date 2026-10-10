@@ -148,3 +148,90 @@ def test_selected_venues_parsing():
     assert perps.selected_venues(" Deribit , okx ") == ["deribit", "okx"]
     with pytest.raises(ValueError):
         perps.selected_venues("deribit,kraken_futures")
+
+
+# ---- aggregated (nSigFigs) book extension ---------------------------------------------------
+
+
+def test_bucket_step_follows_significant_figures():
+    assert perps.bucket_step(83_036.0, 4) == 10.0
+    assert perps.bucket_step(83_036.0, 3) == 100.0
+    assert perps.bucket_step(2_450.5, 4) == 1.0
+    assert perps.bucket_step(2_450.5, 3) == 10.0
+
+
+def test_extend_side_bids_adds_only_what_the_finer_book_misses():
+    # raw book: 83019 .. 83017 (edge 83017). agg bucket 83010 = [83010, 83020) holds the raw
+    # 83019/83018/83017 (1+1+1 = 3) plus 4 more below the edge; bucket 83000 is entirely beyond.
+    p, s = perps.extend_side(
+        [83019.0, 83018.0, 83017.0],
+        [1.0, 1.0, 1.0],
+        [83010.0, 83000.0],
+        [7.0, 20.0],
+        step=10.0,
+        is_bid=True,
+    )
+    pairs = sorted(zip(p, s), reverse=True)
+    assert pairs == [
+        (83019.0, 1.0),
+        (83018.0, 1.0),
+        (83017.0, 1.0),
+        (83010.0, 4.0),  # 7 - 3 already counted, labelled at the bucket's far edge
+        (83000.0, 20.0),
+    ]
+
+
+def test_extend_side_asks_use_buckets_that_round_up():
+    # ask bucket labelled 83060 is (83050, 83060]; raw edge 83056 lies inside it
+    p, s = perps.extend_side(
+        [83054.0, 83056.0],
+        [2.0, 3.0],
+        [83060.0, 83070.0],
+        [9.0, 5.0],
+        step=10.0,
+        is_bid=False,
+    )
+    pairs = sorted(zip(p, s))
+    assert pairs == [(83054.0, 2.0), (83056.0, 3.0), (83060.0, 4.0), (83070.0, 5.0)]
+
+
+def test_extend_side_never_adds_negative_or_inner_buckets():
+    # an aggregated snapshot a moment older/newer can be smaller than what raw already holds
+    p, s = perps.extend_side(
+        [100.0, 99.0], [5.0, 5.0], [100.0, 90.0], [1.0, 2.0], step=10.0, is_bid=True
+    )
+    # bucket 100 is not beyond the edge (label 100 >= edge 99): skipped. bucket 90 = [90, 100)
+    # already holds the raw 99 (5 > 2), so its remainder is negative: skipped, not subtracted
+    assert sorted(zip(p, s), reverse=True) == [(100.0, 5.0), (99.0, 5.0)]
+
+
+def test_extend_side_empty_inputs_pass_through():
+    p, s = perps.extend_side([], [], [90.0], [1.0], step=10.0, is_bid=True)
+    assert len(p) == 0 and len(s) == 0
+    p, s = perps.extend_side([100.0], [1.0], [], [], step=10.0, is_bid=True)
+    assert list(p) == [100.0] and list(s) == [1.0]
+
+
+def test_deep_books_cascade_fine_to_coarse_and_expire():
+    clock = [0.0]
+    deep = perps.DeepBooks(max_age_seconds=30.0, clock=lambda: clock[0])
+    raw = (np.array([83_000.0]), np.array([1.0]), np.array([83_001.0]), np.array([1.0]))
+    # 4 figures (step 10): bids 82_990 / asks 83_010; 3 figures (step 100): bids 82_900 / asks 83_100
+    deep.update(
+        "BTC", 4, np.array([82_990.0]), np.array([2.0]), np.array([83_010.0]), np.array([2.0])
+    )
+    deep.update(
+        "BTC", 3, np.array([82_900.0]), np.array([5.0]), np.array([83_100.0]), np.array([5.0])
+    )
+    bp, bs, ap, a_s = deep.extend("BTC", *raw)
+    assert sorted(bp) == [82_900.0, 82_990.0, 83_000.0]
+    assert sorted(ap) == [83_001.0, 83_010.0, 83_100.0]
+    # a different symbol is untouched, and stale aggregated books are ignored
+    assert len(deep.extend("ETH", *raw)[0]) == 1
+    clock[0] = 31.0
+    assert len(deep.extend("BTC", *raw)[0]) == 1
+
+
+def test_hyperliquid_venue_requests_aggregated_books():
+    assert perps.VENUES["hyperliquid"].deep_sig_figs == (4, 3)
+    assert perps.VENUES["okx"].deep_sig_figs == ()  # its WebSocket already serves the maximum

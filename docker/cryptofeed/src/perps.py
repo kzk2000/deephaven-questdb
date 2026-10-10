@@ -21,6 +21,9 @@ Nothing here talks to the network at import time. Contract specs are fetched by
 """
 
 import json
+import math
+import threading
+import time
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, Optional
@@ -140,6 +143,9 @@ class Venue:
     specs: Callable  # (symbols, fetch) -> {symbol: SizeSpec}
     # cryptofeed symbol -> symbol stored in QuestDB, where cryptofeed's name would mislead
     aliases: Dict[str, str] = field(default_factory=dict)
+    # extra aggregated L2 subscriptions (venue "nSigFigs" values, finest first) that reach far
+    # beyond the raw book; see DeepBooks
+    deep_sig_figs: tuple = ()
 
     def stored_symbol(self, symbol: str) -> str:
         return self.aliases.get(symbol, symbol)
@@ -170,6 +176,8 @@ VENUES: Dict[str, Venue] = {
         ("BTC-USD-PERP", "ETH-USD-PERP"),  # cryptofeed's names for the USDC-margined perps
         hyperliquid_specs,
         aliases={"BTC-USD-PERP": "BTC-USDC-PERP", "ETH-USD-PERP": "ETH-USDC-PERP"},
+        # the raw book is 20 levels (~2 bps BTC); 4 / 3 significant figures reach ~25 / ~250 bps
+        deep_sig_figs=(4, 3),
     ),
     "bybit": Venue(
         "bybit",
@@ -253,6 +261,82 @@ def _walk(prices: np.ndarray, base_sizes: np.ndarray, notional: float):
     spent_before = cumulative[k - 1] if k > 0 else 0.0
     quantity = float(base_sizes[:k].sum()) + (notional - spent_before) / prices[k]
     return notional / quantity
+
+
+def bucket_step(price: float, n_sig_figs: int) -> float:
+    """Price width of one aggregated level when a venue rounds prices to n significant figures."""
+    return 10.0 ** (math.floor(math.log10(price)) - n_sig_figs + 1)
+
+
+def extend_side(prices, sizes, agg_prices, agg_sizes, step: float, is_bid: bool):
+    """Append the part of an aggregated book side that lies beyond a finer book's last level.
+
+    Aggregated levels are labelled with the edge of their bucket farthest from the mid (bids
+    round down: bucket [p, p + step); asks round up: bucket (p - step, p]), which is how
+    Hyperliquid's nSigFigs books behave. A bucket straddling the finer book's last level
+    contributes only what the finer book did not already count, placed at its label price (the
+    far end of its range, so depth within N bps is never overstated). Order of the inputs does
+    not matter; the result is unsorted.
+    """
+    prices = np.asarray(prices, dtype=np.float64)
+    sizes = np.asarray(sizes, dtype=np.float64)
+    agg_prices = np.asarray(agg_prices, dtype=np.float64)
+    agg_sizes = np.asarray(agg_sizes, dtype=np.float64)
+    if len(prices) == 0 or len(agg_prices) == 0:
+        return prices, sizes
+    edge = prices.min() if is_bid else prices.max()
+    out_p, out_s = [prices], [sizes]
+    tol = step * 1e-9
+    for p, size in zip(agg_prices, agg_sizes):
+        if is_bid:
+            if p >= edge - tol:
+                continue
+            inside = (prices >= p - tol) & (prices < p + step - tol)
+        else:
+            if p <= edge + tol:
+                continue
+            inside = (prices > p - step + tol) & (prices <= p + tol)
+        remainder = size - sizes[inside].sum()
+        if remainder > 0:
+            out_p.append(np.array([p]))
+            out_s.append(np.array([remainder]))
+    return np.concatenate(out_p), np.concatenate(out_s)
+
+
+class DeepBooks:
+    """Latest aggregated books per (symbol, n_sig_figs), shared between feeds.
+
+    One feed per aggregation level writes here; the liquidity callback of the raw book reads
+    through `extend`, which appends each coarser book beyond what the finer ones cover. Entries
+    older than max_age_seconds are ignored, so a stalled subscription degrades to the raw book.
+    """
+
+    def __init__(self, max_age_seconds: float = 30.0, clock: Callable = time.monotonic):
+        self._max_age = max_age_seconds
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._books: Dict[tuple, tuple] = {}
+
+    def update(self, symbol, n_sig_figs, bid_prices, bid_sizes, ask_prices, ask_sizes):
+        with self._lock:
+            self._books[(symbol, n_sig_figs)] = (
+                self._clock(),
+                (bid_prices, bid_sizes, ask_prices, ask_sizes),
+            )
+
+    def extend(self, symbol, bid_prices, bid_sizes, ask_prices, ask_sizes):
+        """The raw book with every fresh aggregated book appended beyond its edge (finest first)."""
+        with self._lock:
+            levels = sorted((n, entry) for (sym, n), entry in self._books.items() if sym == symbol)
+            now = self._clock()
+        for n_sig_figs, (stamp, (bp, bs, ap, a_s)) in sorted(levels, reverse=True):
+            if now - stamp > self._max_age:
+                continue
+            mid_price = (np.max(bid_prices) + np.min(ask_prices)) / 2.0
+            step = bucket_step(mid_price, n_sig_figs)
+            bid_prices, bid_sizes = extend_side(bid_prices, bid_sizes, bp, bs, step, is_bid=True)
+            ask_prices, ask_sizes = extend_side(ask_prices, ask_sizes, ap, a_s, step, is_bid=False)
+        return bid_prices, bid_sizes, ask_prices, ask_sizes
 
 
 def compute_liquidity(

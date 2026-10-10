@@ -235,3 +235,59 @@ def test_book_callback_survives_a_write_error(script, capsys):
     book = SimpleNamespace(exchange="OKX", symbol="BTC-USDT-PERP")
     asyncio.run(script.book_callback(writer, {"BTC-USDT-PERP": perps.BASE})(book, 5.0))
     assert "boom" in capsys.readouterr().out
+
+
+def test_aggregated_feed_subscribes_with_n_sig_figs(script):
+    import json
+
+    class FakeFeed:
+        def _reset(self):
+            pass
+
+    feed_class = script.aggregated_feed_class(FakeFeed, 3)
+    assert feed_class.__name__ == "FakeFeedAgg3"
+    sent = []
+
+    class FakeConn:
+        subscription = {"l2Book": ["BTC", "ETH"]}
+
+        async def write(self, message):
+            sent.append(json.loads(message))
+
+    asyncio.run(feed_class().subscribe(FakeConn()))
+    assert [m["subscription"] for m in sent] == [
+        {"type": "l2Book", "coin": "BTC", "nSigFigs": 3},
+        {"type": "l2Book", "coin": "ETH", "nSigFigs": 3},
+    ]
+    assert all(m["method"] == "subscribe" for m in sent)
+
+
+def test_liquidity_callback_extends_the_raw_book_with_deep_books(script):
+    writer = MagicMock()
+    specs = {"BTC-USD-PERP": perps.BASE}
+    deep = perps.DeepBooks()
+    # the raw book is 1 level a side; the 3-figure book carries 5 BTC ~60 bps from the mid
+    deep.update(
+        "BTC-USD-PERP",
+        3,
+        np.array([82_500.0]),
+        np.array([5.0]),
+        np.array([83_500.0]),
+        np.array([5.0]),
+    )
+    book = _fake_book(
+        {Decimal("83000"): Decimal("1")}, {Decimal("83010"): Decimal("1")}, symbol="BTC-USD-PERP"
+    )
+    asyncio.run(script.liquidity_callback(writer, specs, deep_books=deep)(book, 1.0))
+    cols = writer.write_row.call_args.kwargs["columns"]
+    assert cols["bid_levels"] == 2 and cols["ask_levels"] == 2
+    mid = 83_005.0
+    assert cols["bid_reach_bps"] == pytest.approx((mid - 82_500) / mid * 1e4)
+    assert cols["bid_usd_25bp"] == pytest.approx(83_000.0)  # the deep level is ~60 bps out
+    assert cols["bid_usd_100bp"] == pytest.approx(83_000.0 + 5 * 82_500.0)
+    assert cols["ask_usd_100bp"] == pytest.approx(83_010.0 + 5 * 83_500.0)
+
+    # without deep books the same raw book is unchanged
+    writer.reset_mock()
+    asyncio.run(script.liquidity_callback(writer, specs)(book, 1.0))
+    assert writer.write_row.call_args.kwargs["columns"]["bid_levels"] == 1
