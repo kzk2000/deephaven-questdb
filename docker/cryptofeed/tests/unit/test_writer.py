@@ -201,6 +201,24 @@ def test_missing_trade_id_gets_a_unique_synthetic_id(mock_connect):
     writer.close()
 
 
+def test_write_row_converts_numpy_scalars_and_skips_none(mock_connect):
+    import numpy as np
+
+    writer = QuestDBWriter(host="questdb", verbose=False)
+    assert writer.write_row(
+        "perps_liquidity",
+        symbols={"exchange": "DERIBIT"},
+        columns={"mid": np.float64(100.5), "bid_levels": np.int64(7), "buy_slip_bps_1m": None},
+        timestamp=1_700_000_000.5,
+    )
+    row = mock_connect.return_value.sender.return_value.row.call_args
+    columns = row.kwargs["columns"]
+    assert columns == {"mid": 100.5, "bid_levels": 7}
+    assert type(columns["mid"]) is float and type(columns["bid_levels"]) is int
+    assert row.args == ("perps_liquidity",)
+    writer.close()
+
+
 def test_close_waits_for_acks_and_releases_connection(mock_connect):
     writer = QuestDBWriter(host="questdb", verbose=False)
     db = mock_connect.return_value
@@ -237,3 +255,20 @@ if __name__ == "__main__":
     import pytest
 
     pytest.main([__file__, "-v"])
+
+
+def test_orderbook_symbol_override(mock_connect):
+    from collections import OrderedDict
+    from types import SimpleNamespace
+
+    writer = QuestDBWriter(host="questdb", verbose=False)
+    book = SimpleNamespace(
+        exchange="HYPERLIQUID",
+        symbol="BTC-USD-PERP",
+        timestamp=1_700_000_000.5,
+        book=SimpleNamespace(bids=OrderedDict({100.0: 1.0}), asks=OrderedDict({101.0: 1.0})),
+    )
+    assert writer.write_orderbook(book, 1_700_000_000.6, depth=5, symbol="BTC-USDC-PERP")
+    row = mock_connect.return_value.sender.return_value.row.call_args.kwargs
+    assert row["symbols"] == {"exchange": "HYPERLIQUID", "symbol": "BTC-USDC-PERP"}
+    writer.close()

@@ -208,7 +208,7 @@ class QuestDBWriter:
     # Orderbook Method (using SDK with 2D numpy arrays)
     # =========================================================================
 
-    def write_orderbook(self, book, receipt_timestamp, depth=20, size_fn=None):
+    def write_orderbook(self, book, receipt_timestamp, depth=20, size_fn=None, symbol=None):
         """
         Write orderbook snapshot to QuestDB using SDK with 2D numpy arrays
 
@@ -225,6 +225,7 @@ class QuestDBWriter:
             depth: Number of price levels to capture (default 20)
             size_fn: optional callable(prices, sizes) -> sizes applied to both sides, used to
                 convert contract / USD sizes to base coin (see perps.SizeSpec.to_base_array)
+            symbol: store the book under this symbol instead of book.symbol (venue aliases)
 
         Returns:
             bool: True if successful, False otherwise
@@ -232,7 +233,7 @@ class QuestDBWriter:
         try:
             # Extract data
             exchange = book.exchange
-            symbol = book.symbol
+            symbol = symbol or book.symbol
             timestamp = book.timestamp or receipt_timestamp
 
             # Convert to nanoseconds
@@ -335,6 +336,29 @@ class QuestDBWriter:
     # =========================================================================
     # Common Methods
     # =========================================================================
+
+    def write_row(self, table, symbols, columns, timestamp):
+        """Write one arbitrary row (used for derived tables such as perps_liquidity).
+
+        `columns` entries that are None are skipped (stored as NULL). `timestamp` is epoch
+        seconds (float). Returns True on success.
+        """
+        try:
+            self._sender.row(
+                table,
+                symbols=symbols,
+                # numpy scalars are not accepted by the SDK; .item() gives the Python value
+                columns={
+                    k: (v.item() if hasattr(v, "item") else v)
+                    for k, v in columns.items()
+                    if v is not None
+                },
+                at=TimestampNanos(int(timestamp * 1_000_000_000)),
+            )
+            return True
+        except Exception as e:
+            print(f"Error writing row to {table}: {e}")
+            return False
 
     def flush(self, wait=False):
         """Publish buffered rows. wait=True (ws only) also blocks until the server has

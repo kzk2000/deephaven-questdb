@@ -6,6 +6,8 @@ This script should be run before starting cryptofeed to ensure tables exist with
 import sys
 import time
 
+import perps
+
 # Idempotent trades: a replayed trade (Coinbase re-sends its last match on every subscribe, a
 # restart or a QWP reconnect replay) overwrites itself instead of adding a row. The trade id
 # must be part of the key: thousands of timestamps hold several distinct trades. A NULL id
@@ -23,6 +25,74 @@ TRADES_EXTRA_COLUMNS = (
     ("contract_type", "SYMBOL CAPACITY 16 CACHE"),
     ("notional_usd", "DOUBLE"),
 )
+
+
+def _liquidity_ddl():
+    """CREATE TABLE for the per-second order book liquidity metrics (see perps.py)."""
+    columns = [
+        "timestamp TIMESTAMP_NS",
+        "exchange SYMBOL CAPACITY 256 CACHE",
+        "symbol SYMBOL CAPACITY 256 CACHE",
+        "contract_type SYMBOL CAPACITY 16 CACHE",
+    ]
+    columns += [f"{name} LONG" for name in perps.LIQUIDITY_LONG_COLUMNS]
+    columns += [f"{name} DOUBLE" for name in perps.LIQUIDITY_DOUBLE_COLUMNS]
+    body = ",\n        ".join(columns)
+    return (
+        f"CREATE TABLE IF NOT EXISTS perps_liquidity (\n        {body}\n"
+        ") TIMESTAMP(timestamp) PARTITION BY DAY WAL"
+    )
+
+
+def _liquidity_1m_view_ddl():
+    """1-minute averages of every liquidity metric; reach is the worst (minimum) coverage."""
+    avg = [
+        f"avg({c}) AS {c}" for c in perps.LIQUIDITY_DOUBLE_COLUMNS if not c.endswith("reach_bps")
+    ]
+    reach = [f"min({c}) AS {c}" for c in ("bid_reach_bps", "ask_reach_bps")]
+    spread = ["min(spread_bps) AS spread_bps_min", "max(spread_bps) AS spread_bps_max"]
+    select = ",\n        ".join(avg + reach + spread + ["count() AS samples"])
+    return (
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS perps_liquidity_1m AS\n"
+        f"    SELECT timestamp, exchange, symbol,\n        {select}\n"
+        "    FROM perps_liquidity\n    SAMPLE BY 1m"
+    )
+
+
+PERPS_LIQUIDITY_DDL = _liquidity_ddl()
+PERPS_LIQUIDITY_TTL_SQL = "ALTER TABLE perps_liquidity SET TTL 3 DAYS"
+PERPS_LIQUIDITY_1M_DDL = _liquidity_1m_view_ddl()
+PERPS_TRADES_1M_DDL = """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS perps_trades_1m AS
+    SELECT timestamp, exchange, symbol,
+        first(price) AS open, max(price) AS high, min(price) AS low, last(price) AS close,
+        sum(size) AS volume_base,
+        sum(notional_usd) AS notional_usd,
+        sum(CASE WHEN side = 'buy' THEN notional_usd ELSE 0.0 END) AS buy_notional_usd,
+        sum(CASE WHEN side = 'sell' THEN notional_usd ELSE 0.0 END) AS sell_notional_usd,
+        count() AS trades
+    FROM trades
+    WHERE contract_type <> 'spot'
+    SAMPLE BY 1m
+"""
+
+
+def init_perps_liquidity(host, http_port):
+    """Create the liquidity table and the views the perps dashboard reads (idempotent)."""
+    print("\n  Creating perps liquidity table and views")
+    steps = (
+        ("perps_liquidity", PERPS_LIQUIDITY_DDL),
+        ("TTL perps_liquidity (3 DAYS)", PERPS_LIQUIDITY_TTL_SQL),
+        ("perps_liquidity_1m view", PERPS_LIQUIDITY_1M_DDL),
+        ("perps_trades_1m view", PERPS_TRADES_1M_DDL),
+    )
+    for label, sql in steps:
+        result = execute_sql(host, http_port, sql)
+        if result and (result.get("ddl") == "OK" or result.get("dataset") is not None):
+            print(f"    ✅ {label}")
+        else:
+            error = "no response" if result is None else result.get("error", result)
+            print(f"    ⚠️  {label}: {error}")
 
 
 def execute_sql(host, port, sql):
@@ -259,6 +329,8 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     result = execute_sql(host, http_port, mv_check_sql)
     if result and "dataset" in result and result["dataset"]:
         print("    ✅ materialized view orderbooks_1s verified")
+
+    init_perps_liquidity(host, http_port)
 
     print("\n✅ QuestDB initialization complete!\n")
 

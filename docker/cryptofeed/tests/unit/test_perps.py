@@ -101,19 +101,6 @@ def test_okx_specs_from_instrument_list():
     assert "SOL-USDT-PERP" not in specs  # not listed
 
 
-def test_binance_delivery_specs_use_contract_size():
-    sample = {
-        "symbols": [
-            {"symbol": "BTCUSD_PERP", "contractSize": 100},
-            {"symbol": "ETHUSD_PERP", "contractSize": 10},
-            {"symbol": "BTCUSD_260925", "contractSize": 100},  # dated future, ignored
-        ]
-    }
-    specs = perps.binance_delivery_specs(["BTC-USD-PERP", "ETH-USD-PERP"], fetch=lambda url: sample)
-    assert specs["BTC-USD-PERP"] == SizeSpec("inverse", 100.0, "CONTRACTS")
-    assert specs["ETH-USD-PERP"] == SizeSpec("inverse", 10.0, "CONTRACTS")
-
-
 def test_deribit_bybit_and_binance_futures_specs_by_symbol_suffix():
     syms = ["BTC-USD-PERP", "BTC-USDC-PERP", "ETH-USD-PERP", "ETH-USDT-PERP"]
     for build in (perps.deribit_specs, perps.bybit_specs):
@@ -130,6 +117,23 @@ def test_build_specs_only_for_symbols_the_venue_lists():
     specs = perps.build_specs(venue, available=["BTC-USD-PERP", "SOL-USD-PERP"])
     assert list(specs) == ["BTC-USD-PERP"]
     assert perps.build_specs(venue, available=[]) == {}
+
+
+def test_hyperliquid_perps_are_linear_base_coin_despite_the_usd_suffix():
+    # cryptofeed calls them BTC-USD-PERP; inferring "inverse" from that suffix would divide a
+    # base-coin size by the price
+    venue = perps.VENUES["hyperliquid"]
+    specs = perps.build_specs(venue, available=["BTC-USD-PERP", "ETH-USD-PERP", "DOGE-USD-PERP"])
+    assert specs == {"BTC-USD-PERP": perps.BASE, "ETH-USD-PERP": perps.BASE}
+    assert specs["BTC-USD-PERP"].contract_type == "linear"
+    assert venue.stored_symbol("BTC-USD-PERP") == "BTC-USDC-PERP"
+    assert venue.stored_symbol("ETH-USD-PERP") == "ETH-USDC-PERP"
+    assert venue.stored_symbol("BTC-USDT-PERP") == "BTC-USDT-PERP"  # no alias: unchanged
+
+
+def test_binance_is_usdt_margined_only():
+    assert "binance_delivery" not in perps.VENUES  # COIN-M (inverse) is not wanted
+    assert perps.VENUES["binance_futures"].symbols == ("BTC-USDT-PERP", "ETH-USDT-PERP")
 
 
 def test_every_venue_wants_btc_and_eth_perpetuals_only():

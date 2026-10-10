@@ -2,7 +2,7 @@
 BTC / ETH perpetual futures (linear and inverse) from Binance, Bybit, Deribit and OKX.
 
 Trades and L2 books go to the same `trades` / `orderbooks` tables as the spot feeds.
-`exchange` is BINANCE_FUTURES, BINANCE_DELIVERY, BYBIT, DERIBIT or OKX; `symbol` is
+`exchange` is BINANCE_FUTURES (USDT-M only), BYBIT, DERIBIT, HYPERLIQUID or OKX; `symbol` is
 BTC-USD-PERP (inverse, coin margined) or BTC-USDT-PERP / BTC-USDC-PERP (linear).
 
 `size` is normalized to base coin so it is comparable with spot. trades also keeps the venue's
@@ -10,12 +10,16 @@ own number (size_native, size_unit), the contract multiplier (contract_size, 1 f
 margin type (contract_type: spot / linear / inverse) and the dollar notional (notional_usd);
 see perps.py.
 
+Per second and instrument it also writes `perps_liquidity` (spread, $ depth within 1..100 bps of
+mid, slippage for $10k..$5m market orders) computed from the full in-memory book, which
+QuestDB turns into the 1-minute view perps_liquidity_1m.
+
 Venues that cannot be reached (Binance and Bybit refuse some regions with HTTP 451/403) are
 skipped and re-probed every PERP_REPROBE_SECONDS; the process restarts itself when one becomes
 reachable so it is picked up without operator action.
 
 Environment:
-    PERP_VENUES            comma list from deribit,okx,binance_futures,binance_delivery,bybit
+    PERP_VENUES            comma list from deribit,okx,binance_futures,bybit,hyperliquid
                            (default: all)
     PERP_REPROBE_SECONDS   seconds between re-probes of skipped venues (default 600, 0 = never)
 """
@@ -30,15 +34,20 @@ import time
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import numpy as np
 import perps
 from questdb_writer import QuestDBWriter
 
-ORDERBOOK_DEPTH = 20
+ORDERBOOK_DEPTH = 20  # levels per side written to the orderbooks table
+BOOK_DEPTH = 0  # keep the whole book in memory (0 = unlimited) for the liquidity metrics
+LIQUIDITY_INTERVAL_SECONDS = 1.0  # at most one perps_liquidity row per instrument per second
 RETRY_SLEEP_SECONDS = 60
 
 
-def trade_callback(writer, specs):
+def trade_callback(writer, specs, aliases=None):
     """Write a trade: `size` in base coin, plus native size, contract multiplier and notional."""
+
+    aliases = aliases or {}
 
     async def on_trade(trade, receipt_timestamp):
         spec = specs.get(trade.symbol)
@@ -49,7 +58,7 @@ def trade_callback(writer, specs):
         writer.write_trade(
             {
                 "exchange": trade.exchange,
-                "symbol": trade.symbol,
+                "symbol": aliases.get(trade.symbol, trade.symbol),
                 "side": trade.side,
                 "price": price,
                 "amount": spec.to_base(price, native),
@@ -67,8 +76,10 @@ def trade_callback(writer, specs):
     return on_trade
 
 
-def book_callback(writer, specs):
+def book_callback(writer, specs, aliases=None):
     """Write an order book snapshot with level sizes converted to base coin."""
+
+    aliases = aliases or {}
 
     async def on_book(book, receipt_timestamp):
         spec = specs.get(book.symbol)
@@ -76,7 +87,11 @@ def book_callback(writer, specs):
             return
         try:
             writer.write_orderbook(
-                book, receipt_timestamp, depth=ORDERBOOK_DEPTH, size_fn=spec.to_base_array
+                book,
+                receipt_timestamp,
+                depth=ORDERBOOK_DEPTH,
+                size_fn=spec.to_base_array,
+                symbol=aliases.get(book.symbol),
             )
         except Exception as e:  # keep the feed alive on a malformed update
             print(f"Error writing {book.exchange} {book.symbol} orderbook: {e}")
@@ -100,6 +115,67 @@ def quiet_loggers(*names):
     finally:
         for lg, level in zip(loggers, previous):
             lg.setLevel(level)
+
+
+def _side_arrays(side):
+    """(prices, sizes) of one side of a cryptofeed order book as float arrays."""
+    items = list(side.items())
+    prices = np.fromiter((float(p) for p, _ in items), dtype=np.float64, count=len(items))
+    sizes = np.fromiter((float(s) for _, s in items), dtype=np.float64, count=len(items))
+    return prices, sizes
+
+
+def liquidity_callback(
+    writer,
+    specs,
+    interval=LIQUIDITY_INTERVAL_SECONDS,
+    clock=time.monotonic,
+    table="perps_liquidity",
+    aliases=None,
+):
+    """Throttled spread / depth-within-N-bps / slippage metrics from the full in-memory book.
+
+    Venues publish different amounts of book (Deribit all of it, OKX 400 levels per side), so
+    each row also records how far from mid the published book reaches (bid/ask_reach_bps) and
+    consumers can tell an exact bucket from a lower bound.
+    """
+    last_emit = {}
+    aliases = aliases or {}
+
+    async def on_book(book, receipt_timestamp):
+        spec = specs.get(book.symbol)
+        if spec is None:
+            return
+        key = (book.exchange, book.symbol)
+        now = clock()
+        if now - last_emit.get(key, float("-inf")) < interval:
+            return
+        last_emit[key] = now
+        try:
+            bid_prices, bid_sizes = _side_arrays(book.book.bids)
+            ask_prices, ask_sizes = _side_arrays(book.book.asks)
+            metrics = perps.compute_liquidity(
+                bid_prices,
+                spec.to_base_array(bid_prices, bid_sizes),
+                ask_prices,
+                spec.to_base_array(ask_prices, ask_sizes),
+            )
+            if metrics is None:
+                return
+            writer.write_row(
+                table,
+                symbols={
+                    "exchange": book.exchange,
+                    "symbol": aliases.get(book.symbol, book.symbol),
+                    "contract_type": spec.contract_type,
+                },
+                columns=metrics,
+                timestamp=book.timestamp or receipt_timestamp,
+            )
+        except Exception as e:  # never let a metrics error stop the feed
+            print(f"Error computing {book.exchange} {book.symbol} liquidity: {e}")
+
+    return on_book
 
 
 def probe(venue):
@@ -160,19 +236,24 @@ def main():
             feed_class(
                 channels=[TRADES],
                 symbols=symbols,
-                callbacks={TRADES: [trade_callback(writer, specs)]},
+                callbacks={TRADES: [trade_callback(writer, specs, venue.aliases)]},
             )
         )
         handler.add_feed(
             feed_class(
                 channels=[L2_BOOK],
                 symbols=symbols,
-                max_depth=ORDERBOOK_DEPTH,
-                callbacks={L2_BOOK: [book_callback(writer, specs)]},
+                max_depth=BOOK_DEPTH,
+                callbacks={
+                    L2_BOOK: [
+                        book_callback(writer, specs, venue.aliases),
+                        liquidity_callback(writer, specs, aliases=venue.aliases),
+                    ]
+                },
             )
         )
         enabled[name] = symbols
-        summary = ", ".join(f"{s} [{specs[s].native_unit}]" for s in symbols)
+        summary = ", ".join(f"{venue.stored_symbol(s)} [{specs[s].native_unit}]" for s in symbols)
         print(f"[perps] {name}: {summary}")
 
     sys.stdout.flush()

@@ -73,6 +73,87 @@ def test_linear_contract_trade_carries_multiplier_and_notional(script):
     assert data["notional_usd"] == pytest.approx(1.2 * 83107.6)
 
 
+class FakeSide(dict):
+    """price -> size mapping with the .items() cryptofeed's order book side offers."""
+
+
+def _fake_book(bids, asks, exchange="DERIBIT", symbol="BTC-USD-PERP", timestamp=1_700_000_000.5):
+    return SimpleNamespace(
+        exchange=exchange,
+        symbol=symbol,
+        timestamp=timestamp,
+        book=SimpleNamespace(bids=FakeSide(bids), asks=FakeSide(asks)),
+    )
+
+
+def test_liquidity_callback_writes_one_row_with_metrics(script):
+    writer = MagicMock()
+    specs = {"BTC-USD-PERP": perps.BASE}
+    book = _fake_book({Decimal("100"): Decimal("2")}, {Decimal("101"): Decimal("3")})
+    asyncio.run(script.liquidity_callback(writer, specs, interval=1.0)(book, 1.0))
+    args, kwargs = writer.write_row.call_args
+    assert args == ("perps_liquidity",)
+    assert kwargs["symbols"] == {
+        "exchange": "DERIBIT",
+        "symbol": "BTC-USD-PERP",
+        "contract_type": "linear",
+    }
+    cols = kwargs["columns"]
+    assert cols["mid"] == 100.5
+    assert cols["bid_usd_100bp"] == pytest.approx(200.0)
+    assert cols["ask_usd_100bp"] == pytest.approx(303.0)
+    assert kwargs["timestamp"] == 1_700_000_000.5
+
+
+def test_liquidity_callback_converts_inverse_sizes_to_usd_depth(script):
+    writer = MagicMock()
+    specs = {"BTC-USD-PERP": perps.INVERSE_USD}
+    # 10,000 USD at 100 and at 101: base = 100 / 99.0099 coin, depth in USD stays 10,000
+    book = _fake_book({Decimal("100"): Decimal("10000")}, {Decimal("101"): Decimal("10000")})
+    asyncio.run(script.liquidity_callback(writer, specs)(book, 1.0))
+    cols = writer.write_row.call_args.kwargs["columns"]
+    assert cols["bid_usd_100bp"] == pytest.approx(10_000.0)
+    assert cols["ask_usd_100bp"] == pytest.approx(10_000.0)
+
+
+def test_liquidity_callback_is_throttled_per_instrument(script):
+    writer = MagicMock()
+    clock_values = iter([0.0, 0.2, 0.4, 1.1, 1.2])
+    cb = script.liquidity_callback(
+        writer,
+        {"BTC-USD-PERP": perps.BASE, "ETH-USD-PERP": perps.BASE},
+        interval=1.0,
+        clock=lambda: next(clock_values),
+    )
+    btc = _fake_book({Decimal("100"): Decimal("1")}, {Decimal("101"): Decimal("1")})
+    eth = _fake_book(
+        {Decimal("100"): Decimal("1")}, {Decimal("101"): Decimal("1")}, symbol="ETH-USD-PERP"
+    )
+
+    async def feed():
+        await cb(btc, 1.0)  # t=0.0 emitted
+        await cb(btc, 1.0)  # t=0.2 throttled
+        await cb(eth, 1.0)  # t=0.4 a different instrument: emitted
+        await cb(btc, 1.0)  # t=1.1 interval elapsed: emitted
+        await cb(eth, 1.0)  # t=1.2 throttled
+
+    asyncio.run(feed())
+    assert writer.write_row.call_count == 3
+
+
+def test_liquidity_callback_skips_crossed_books_and_survives_errors(script, capsys):
+    writer = MagicMock()
+    specs = {"BTC-USD-PERP": perps.BASE}
+    crossed = _fake_book({Decimal("102"): Decimal("1")}, {Decimal("101"): Decimal("1")})
+    asyncio.run(script.liquidity_callback(writer, specs)(crossed, 1.0))
+    writer.write_row.assert_not_called()
+
+    writer.write_row.side_effect = RuntimeError("boom")
+    ok = _fake_book({Decimal("100"): Decimal("1")}, {Decimal("101"): Decimal("1")})
+    asyncio.run(script.liquidity_callback(writer, specs)(ok, 1.0))
+    assert "boom" in capsys.readouterr().out
+
+
 def test_quiet_loggers_silences_then_restores(script):
     import logging
 
@@ -92,6 +173,39 @@ def test_quiet_loggers_restores_after_an_exception(script):
         with script.quiet_loggers("cryptofeed.connection"):
             raise RuntimeError("probe failed")
     assert log.level == logging.WARNING
+
+
+def test_aliases_rename_the_stored_symbol_everywhere(script):
+    writer = MagicMock()
+    specs = {"BTC-USD-PERP": perps.BASE}
+    aliases = {"BTC-USD-PERP": "BTC-USDC-PERP"}
+
+    trade = SimpleNamespace(
+        exchange="HYPERLIQUID",
+        symbol="BTC-USD-PERP",
+        side="buy",
+        price=Decimal("83000"),
+        amount=Decimal("0.5"),
+        id="1",
+        timestamp=1.0,
+    )
+    asyncio.run(script.trade_callback(writer, specs, aliases)(trade, 1.0))
+    (data,) = writer.write_trade.call_args.args
+    assert data["symbol"] == "BTC-USDC-PERP"
+    assert data["amount"] == 0.5  # base coin, not divided by price
+    assert data["contract_type"] == "linear"
+
+    book = _fake_book(
+        {Decimal("100"): Decimal("1")},
+        {Decimal("101"): Decimal("1")},
+        exchange="HYPERLIQUID",
+        symbol="BTC-USD-PERP",
+    )
+    asyncio.run(script.book_callback(writer, specs, aliases)(book, 1.0))
+    assert writer.write_orderbook.call_args.kwargs["symbol"] == "BTC-USDC-PERP"
+
+    asyncio.run(script.liquidity_callback(writer, specs, aliases=aliases)(book, 1.0))
+    assert writer.write_row.call_args.kwargs["symbols"]["symbol"] == "BTC-USDC-PERP"
 
 
 def test_trade_callback_ignores_unlisted_symbols(script):

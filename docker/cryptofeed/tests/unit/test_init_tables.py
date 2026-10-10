@@ -33,3 +33,24 @@ def test_script_still_exposes_its_entry_points():
     # guards against an edit that drops a helper the constants-only tests would never touch
     assert callable(init.execute_sql)
     assert callable(init.init_tables)
+
+
+def test_liquidity_table_has_every_metric_column():
+    import perps
+
+    ddl = init.PERPS_LIQUIDITY_DDL
+    assert "PARTITION BY DAY" in ddl and "perps_liquidity" in ddl
+    for column in perps.LIQUIDITY_DOUBLE_COLUMNS + perps.LIQUIDITY_LONG_COLUMNS:
+        assert f"{column} " in ddl, column
+    # the headline buckets and slippage sizes the dashboard reads
+    for column in ("bid_usd_1bp", "ask_usd_100bp", "buy_slip_bps_1m", "sell_slip_bps_10k"):
+        assert column in ddl
+
+
+def test_liquidity_views_exist_and_filter_perps_trades():
+    assert "perps_liquidity_1m" in init.PERPS_LIQUIDITY_1M_DDL
+    assert "SAMPLE BY 1m" in init.PERPS_LIQUIDITY_1M_DDL
+    assert "avg(bid_usd_100bp)" in init.PERPS_LIQUIDITY_1M_DDL
+    assert "min(bid_reach_bps)" in init.PERPS_LIQUIDITY_1M_DDL  # worst coverage, not an average
+    assert "contract_type <> 'spot'" in init.PERPS_TRADES_1M_DDL
+    assert "buy_notional_usd" in init.PERPS_TRADES_1M_DDL

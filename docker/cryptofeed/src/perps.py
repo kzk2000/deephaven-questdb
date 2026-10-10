@@ -4,10 +4,10 @@ and book sizes comparable.
 
 Venues report size in different units:
 
-    linear perp (USDT/USDC margined)   base coin (BTC, ETH)           Binance, Bybit, Deribit USDC
+    linear perp (USDT/USDC margined)   base coin (BTC, ETH)           Binance USDT-M, Bybit, Deribit USDC, Hyperliquid
     linear perp, contracts             contracts x coin per contract    OKX BTC-USDT (0.01 BTC), ETH-USDT (0.1 ETH)
     inverse perp (coin margined)       USD notional                     Deribit, Bybit
-    inverse perp, contracts            contracts x USD per contract     OKX (100/10 USD), Binance delivery (100/10 USD)
+    inverse perp, contracts            contracts x USD per contract     OKX (100/10 USD)
 
 `SizeSpec.to_base` turns any of them into a base-coin quantity so that `size` in the trades and
 orderbooks tables means the same thing as it does for spot. For inverse contracts that is
@@ -22,7 +22,7 @@ Nothing here talks to the network at import time. Contract specs are fetched by
 
 import json
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, Optional
 
 import numpy as np
@@ -126,20 +126,10 @@ def okx_specs(symbols: Iterable[str], fetch: Callable = _get_json) -> Dict[str, 
     return specs
 
 
-def binance_delivery_specs(
-    symbols: Iterable[str], fetch: Callable = _get_json
-) -> Dict[str, SizeSpec]:
-    """COIN-M quantity is a contract count; contractSize (USD per contract) is in exchangeInfo."""
-    info = fetch("https://dapi.binance.com/dapi/v1/exchangeInfo")["symbols"]
-    by_symbol = {d["symbol"]: d for d in info}
-    specs = {}
-    for symbol in symbols:
-        base, quote, _ = symbol.split("-")  # BTC-USD-PERP -> BTCUSD_PERP
-        entry = by_symbol.get(f"{base}{quote}_PERP")
-        if entry is None:
-            continue
-        specs[symbol] = SizeSpec("inverse", float(entry["contractSize"]), "CONTRACTS")
-    return specs
+def hyperliquid_specs(symbols: Iterable[str], fetch: Callable = _get_json) -> Dict[str, SizeSpec]:
+    # Hyperliquid perps are USDC-margined and quoted in base coin, even though cryptofeed names
+    # them BTC-USD-PERP (which elsewhere means coin-margined); do not infer from the suffix.
+    return {s: BASE for s in symbols}
 
 
 @dataclass(frozen=True)
@@ -148,6 +138,11 @@ class Venue:
     feed_class: str  # attribute of cryptofeed.exchanges
     symbols: tuple  # normalized symbols we want, filtered by what the venue lists
     specs: Callable  # (symbols, fetch) -> {symbol: SizeSpec}
+    # cryptofeed symbol -> symbol stored in QuestDB, where cryptofeed's name would mislead
+    aliases: Dict[str, str] = field(default_factory=dict)
+
+    def stored_symbol(self, symbol: str) -> str:
+        return self.aliases.get(symbol, symbol)
 
 
 VENUES: Dict[str, Venue] = {
@@ -166,14 +161,15 @@ VENUES: Dict[str, Venue] = {
     "binance_futures": Venue(
         "binance_futures",
         "BinanceFutures",
-        ("BTC-USDT-PERP", "BTC-USDC-PERP", "ETH-USDT-PERP", "ETH-USDC-PERP"),
+        ("BTC-USDT-PERP", "ETH-USDT-PERP"),  # USDT-M only
         binance_futures_specs,
     ),
-    "binance_delivery": Venue(
-        "binance_delivery",
-        "BinanceDelivery",
-        ("BTC-USD-PERP", "ETH-USD-PERP"),
-        binance_delivery_specs,
+    "hyperliquid": Venue(
+        "hyperliquid",
+        "Hyperliquid",
+        ("BTC-USD-PERP", "ETH-USD-PERP"),  # cryptofeed's names for the USDC-margined perps
+        hyperliquid_specs,
+        aliases={"BTC-USD-PERP": "BTC-USDC-PERP", "ETH-USD-PERP": "ETH-USDC-PERP"},
     ),
     "bybit": Venue(
         "bybit",
@@ -190,7 +186,7 @@ VENUES: Dict[str, Venue] = {
     ),
 }
 
-DEFAULT_VENUES = ("deribit", "okx", "binance_futures", "binance_delivery", "bybit")
+DEFAULT_VENUES = ("deribit", "okx", "binance_futures", "bybit", "hyperliquid")
 
 
 def selected_venues(env_value: Optional[str]) -> list:
@@ -211,3 +207,109 @@ def build_specs(
     available = set(available)
     wanted = [s for s in venue.symbols if s in available]
     return venue.specs(wanted, fetch) if wanted else {}
+
+
+# --------------------------------------------------------------------------------------------
+# order book liquidity metrics (computed at ingest from the full in-memory book)
+# --------------------------------------------------------------------------------------------
+
+# $ notional resting within this many bps of mid, and slippage for market orders of these sizes
+DEPTH_BPS = (1, 2, 3, 5, 10, 25, 50, 100)
+SLIPPAGE_NOTIONALS = (10_000, 50_000, 100_000, 250_000, 500_000, 1_000_000, 5_000_000)
+
+
+def notional_label(notional: int) -> str:
+    """10_000 -> "10k", 1_000_000 -> "1m", 50 -> "50" (used in column names)."""
+    if notional >= 1_000_000:
+        return f"{notional // 1_000_000}m"
+    if notional >= 1000:
+        return f"{notional // 1000}k"
+    return str(notional)
+
+
+# Ordered column layout of the perps_liquidity table (after timestamp / exchange / symbol /
+# contract_type). DOUBLE unless listed in LIQUIDITY_LONG_COLUMNS.
+LIQUIDITY_LONG_COLUMNS = ("bid_levels", "ask_levels")
+LIQUIDITY_DOUBLE_COLUMNS = (
+    ("mid", "best_bid", "best_ask", "spread_bps", "bid_reach_bps", "ask_reach_bps")
+    + tuple(f"bid_usd_{n}bp" for n in DEPTH_BPS)
+    + tuple(f"ask_usd_{n}bp" for n in DEPTH_BPS)
+    + tuple(f"buy_slip_bps_{notional_label(n)}" for n in SLIPPAGE_NOTIONALS)
+    + tuple(f"sell_slip_bps_{notional_label(n)}" for n in SLIPPAGE_NOTIONALS)
+)
+
+
+def _walk(prices: np.ndarray, base_sizes: np.ndarray, notional: float):
+    """Average fill price of a market order for `notional` USD, or None if the book is too thin.
+
+    `prices` run from best outward. Level k is consumed fully (price * size dollars) until the
+    order is filled, with a partial fill on the last level.
+    """
+    level_usd = prices * base_sizes
+    cumulative = np.cumsum(level_usd)
+    if len(cumulative) == 0 or cumulative[-1] < notional:
+        return None
+    k = int(np.searchsorted(cumulative, notional))  # first level where cumulative >= notional
+    spent_before = cumulative[k - 1] if k > 0 else 0.0
+    quantity = float(base_sizes[:k].sum()) + (notional - spent_before) / prices[k]
+    return notional / quantity
+
+
+def compute_liquidity(
+    bid_prices, bid_sizes, ask_prices, ask_sizes, bps=DEPTH_BPS, notionals=SLIPPAGE_NOTIONALS
+):
+    """Spread, depth within N bps and slippage for a book, or None for an empty/crossed book.
+
+    Sizes are base coin (so price * size is USD for linear and inverse contracts alike). Levels
+    may arrive in any order; they are sorted best-first here. Depth buckets are cumulative and
+    lower bounds when `*_reach_bps` is smaller than the bucket (the feed published too little
+    book); a slippage of None means the visible book cannot fill that notional.
+    """
+    bid_prices = np.asarray(bid_prices, dtype=np.float64)
+    bid_sizes = np.asarray(bid_sizes, dtype=np.float64)
+    ask_prices = np.asarray(ask_prices, dtype=np.float64)
+    ask_sizes = np.asarray(ask_sizes, dtype=np.float64)
+    bid_live, ask_live = bid_sizes > 0, ask_sizes > 0
+    bid_prices, bid_sizes = bid_prices[bid_live], bid_sizes[bid_live]
+    ask_prices, ask_sizes = ask_prices[ask_live], ask_sizes[ask_live]
+    if len(bid_prices) == 0 or len(ask_prices) == 0:
+        return None
+
+    order = np.argsort(-bid_prices)
+    bid_prices, bid_sizes = bid_prices[order], bid_sizes[order]
+    order = np.argsort(ask_prices)
+    ask_prices, ask_sizes = ask_prices[order], ask_sizes[order]
+
+    best_bid, best_ask = float(bid_prices[0]), float(ask_prices[0])
+    if best_bid >= best_ask or best_bid <= 0:
+        return None  # crossed or broken book: not a meaningful snapshot
+    mid = (best_bid + best_ask) / 2.0
+
+    bid_distance = (mid - bid_prices) / mid * 1e4  # bps, ascending along the book
+    ask_distance = (ask_prices - mid) / mid * 1e4
+    bid_cumulative = np.cumsum(bid_prices * bid_sizes)
+    ask_cumulative = np.cumsum(ask_prices * ask_sizes)
+
+    out = {
+        "mid": mid,
+        "best_bid": best_bid,
+        "best_ask": best_ask,
+        "spread_bps": (best_ask - best_bid) / mid * 1e4,
+        "bid_levels": int(len(bid_prices)),
+        "ask_levels": int(len(ask_prices)),
+        "bid_reach_bps": float(bid_distance[-1]),
+        "ask_reach_bps": float(ask_distance[-1]),
+    }
+    for n in bps:
+        kb = int(np.searchsorted(bid_distance, n, side="right"))
+        ka = int(np.searchsorted(ask_distance, n, side="right"))
+        out[f"bid_usd_{n}bp"] = float(bid_cumulative[kb - 1]) if kb else 0.0
+        out[f"ask_usd_{n}bp"] = float(ask_cumulative[ka - 1]) if ka else 0.0
+    for n in notionals:
+        label = notional_label(n)
+        buy = _walk(ask_prices, ask_sizes, n)
+        sell = _walk(bid_prices, bid_sizes, n)
+        # plain floats: the QuestDB SDK rejects numpy scalar types
+        out[f"buy_slip_bps_{label}"] = None if buy is None else float((buy - mid) / mid * 1e4)
+        out[f"sell_slip_bps_{label}"] = None if sell is None else float((mid - sell) / mid * 1e4)
+    return out

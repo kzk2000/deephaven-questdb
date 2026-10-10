@@ -7,7 +7,7 @@
 ### Data Ingestion
 - **Stack:** QuestDB 10.0.1, Deephaven server-ui 42.6 (Python 3.12), cryptofeed 3.0.1 (Python 3.13)
 - **SDK Version:** questdb==5.0.0 (official QuestDB Python client)
-- **Perpetuals:** BTC/ETH linear and inverse perps from Deribit and OKX stream into `trades` / `orderbooks` (Binance and Bybit are enabled but region-blocked from this host; see CLAUDE.md)
+- **Perpetuals:** BTC/ETH linear and inverse perps from Deribit, OKX and Hyperliquid stream into `trades` / `orderbooks`, with per-second liquidity metrics in `perps_liquidity` (Binance (USDT-M only) and Bybit are enabled but region-blocked from this host; see CLAUDE.md)
 - **Coinbase:** no-auth override of cryptofeed's Coinbase feed (`docker/cryptofeed/src/coinbase.py`) on the public Exchange websocket; Bitstamp and Kraken use cryptofeed's own feeds
 - **Protocol:** QWP over WebSocket (port 9000), 25 ms client flush interval; ILP/HTTP via `QUESTDB_PROTOCOL=http`
 - **Trades:** Pure SDK implementation via ILP
