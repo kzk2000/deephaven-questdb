@@ -4,7 +4,7 @@
 # by monitoring QuestDB's WAL (Write-Ahead Log) for new rows.
 #
 # REQUIREMENTS:
-# 1. Patched Deephaven (run patch_all_callbacks.py first)
+# 1. Deephaven 42.6 or newer (TableDataService callbacks fixed upstream)
 # 2. QuestDB with orderbooks table receiving data
 #
 # Usage:

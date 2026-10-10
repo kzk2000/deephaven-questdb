@@ -1,10 +1,10 @@
-# FIXED VERSION - Works with patched TableDataService API
+# Uses the experimental TableDataService API (Deephaven server-ui 42.6+)
 #
 # This creates a Deephaven table backed by QuestDB storage with real-time updates
 # by monitoring QuestDB for new rows.
 #
 # REQUIREMENTS:
-# 1. Patched Deephaven (run patch_all_callbacks.py first)
+# 1. Deephaven 42.6 or newer (TableDataService callbacks fixed upstream)
 # 2. QuestDB with data in a table
 #
 # Usage:
