@@ -71,7 +71,7 @@ class QuestDBWriter:
         http_port=9000,
         trades_table="trades",
         orderbooks_table="orderbooks",
-        auto_flush_interval_ms=DEFAULT_AUTO_FLUSH_INTERVAL_MS,
+        auto_flush_interval_ms=None,
     ):
         """
         Initialize QuestDB writer with official SDK
@@ -81,13 +81,20 @@ class QuestDBWriter:
             ilp_port: ingest port - 9000 for ws/http (default), 9009 for tcp
             protocol: 'ws' (QWP, default), 'wss', 'http' or 'tcp'. Defaults to the
                 QUESTDB_PROTOCOL environment variable, then 'ws'
-            auto_flush_interval_ms: how long a row may sit in the client buffer (ws only)
+            auto_flush_interval_ms: how long a row may sit in the client buffer (ws only).
+                Every flush is one WAL commit, so a larger value means fewer, bigger commits
+                and less QuestDB CPU at the price of freshness. Defaults to the
+                QUESTDB_AUTO_FLUSH_MS environment variable, then 25
             verbose: Print initialization messages (default: True)
             http_port: HTTP port for SQL queries via REST (default: 9000)
             trades_table: Destination table for trades (default: 'trades')
             orderbooks_table: Destination table for orderbooks (default: 'orderbooks')
         """
         protocol = protocol or os.environ.get("QUESTDB_PROTOCOL") or DEFAULT_PROTOCOL
+        if auto_flush_interval_ms is None:
+            auto_flush_interval_ms = float(
+                os.environ.get("QUESTDB_AUTO_FLUSH_MS") or DEFAULT_AUTO_FLUSH_INTERVAL_MS
+            )
         self.host = host
         self.ilp_port = ilp_port
         self.protocol = protocol

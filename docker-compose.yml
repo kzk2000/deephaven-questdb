@@ -23,6 +23,17 @@ services:
       # Column files are preallocated in append pages of this size (default 16M). A 42-column
       # table with a few thousand rows occupied ~700 MB; 1M brings it to ~44 MB.
       QDB_CAIRO_WRITER_DATA_APPEND_PAGE_SIZE: 1M
+      # Worker pools default to one thread per core (12) in each of the network, write and query
+      # pools; at ~300 rows/s they spin on the constant trickle of small commits and held ~6.6
+      # cores. Sized for this load instead (measured: see CLAUDE.md "QuestDB CPU").
+      QDB_SHARED_NETWORK_WORKER_COUNT: 2
+      QDB_SHARED_WRITE_WORKER_COUNT: 4
+      QDB_SHARED_QUERY_WORKER_COUNT: 4
+      QDB_WAL_APPLY_WORKER_COUNT: 2
+      QDB_MAT_VIEW_REFRESH_WORKER_COUNT: 1
+      # one INFO line per query and per WAL commit was ~900 log lines/s
+      QDB_LOG_SQL_QUERY_PROGRESS_EXE: "false"
+      QDB_LOG_W_STDOUT_LEVEL: ERROR
     ports:
       - 8812:8812
       - 9000:9000
@@ -46,6 +57,9 @@ services:
     container_name: cryptofeed
     build:
       context: docker/cryptofeed
+    environment:
+      # ms a row may wait in the client buffer; each flush is one QuestDB WAL commit
+      QUESTDB_AUTO_FLUSH_MS: 250
     depends_on:
       questdb:
         condition: service_healthy

@@ -72,6 +72,15 @@ def test_writer_close_is_safe():
     writer.close()  # Second close should be safe
 
 
+def test_auto_flush_interval_comes_from_the_environment(mock_connect, mock_sender, monkeypatch):
+    monkeypatch.setenv("QUESTDB_AUTO_FLUSH_MS", "250")
+    writer = QuestDBWriter(host="questdb", verbose=False)
+    assert writer.conf == "ws::addr=questdb:9000;auto_flush_interval=250;"
+    # an explicit argument wins over the environment
+    writer = QuestDBWriter(host="questdb", verbose=False, auto_flush_interval_ms=10)
+    assert writer.conf == "ws::addr=questdb:9000;auto_flush_interval=10;"
+
+
 def test_default_protocol_is_qwp_with_short_auto_flush(mock_connect, mock_sender):
     writer = QuestDBWriter(host="questdb", verbose=False)
     assert writer.protocol == "ws"
