@@ -5,7 +5,7 @@ Real-time trades from QuestDB, drawn with the official
 deephaven-plugin-tradingview-lightweight plugin (TradingView Lightweight Charts).
 
 Two views, switchable in the UI:
-    - Candles: OHLC candlesticks autobinned server-side from raw ticks, with a
+    - Candles: OHLC candlesticks binned in the engine from raw ticks, with a
       volume histogram in a second pane
     - Ticks:   raw trade prices, one line per exchange
 
@@ -20,6 +20,7 @@ Widgets created:
 
 import deephaven.plot.tradingview_lightweight as tvl
 import deephaven.ui as ui
+from deephaven import agg
 from qdb_backend import create_live_table
 
 # =============================================================================
@@ -28,10 +29,10 @@ from qdb_backend import create_live_table
 
 DEFAULT_SYMBOL = "BTC-USD"
 DEFAULT_WINDOW_ROWS = 1000
-DEFAULT_BIN_WIDTH = "PT5S"
+DEFAULT_BIN_SECONDS = 5
 SYMBOLS = ["BTC-USD", "ETH-USD", "AVAX-USD", "SOL-USD"]
 WINDOW_SIZES = [500, 1000, 5000]
-BIN_WIDTHS = {"1s": "PT1S", "5s": "PT5S", "30s": "PT30S", "1m": "PT1M"}
+BIN_SECONDS = {"1s": 1, "5s": 5, "30s": 30, "1m": 60}
 EXCHANGES = ["COINBASE", "BITSTAMP", "KRAKEN"]  # upper case in QuestDB
 
 # Live QuestDB-backed table (the backend registry makes re-running this file safe)
@@ -52,13 +53,26 @@ def recent_trades(symbol, window_rows, exchanges):
 def candle_chart(
     symbol=DEFAULT_SYMBOL,
     window_rows=DEFAULT_WINDOW_ROWS,
-    bin_width=DEFAULT_BIN_WIDTH,
+    bin_seconds=DEFAULT_BIN_SECONDS,
     exchanges=tuple(EXCHANGES),
 ):
-    """OHLC candles autobinned from ticks, with a volume histogram in pane 1."""
+    """OHLC candles binned from ticks in the engine, with a volume histogram in pane 1."""
     ticks = recent_trades(symbol, window_rows, exchanges)
-    # Raw ticks have one price; the engine reduces first/max/min/last per bin
-    ohlc = ticks.update_view(["Open = price", "High = price", "Low = price", "Close = price"])
+    # Reduce ticks to one OHLCV row per time bin (ticks are time-ordered)
+    ohlc = (
+        ticks.update_view([f"Bin = lowerBin(timestamp, {bin_seconds} * SECOND)"])
+        .agg_by(
+            [
+                agg.first("Open = price"),
+                agg.max_("High = price"),
+                agg.min_("Low = price"),
+                agg.last("Close = price"),
+                agg.sum_("Volume = size"),
+            ],
+            by=["Bin"],
+        )
+        .rename_columns(["timestamp = Bin"])
+    )
     candles = tvl.candlestick(
         ohlc,
         timestamp="timestamp",
@@ -66,17 +80,12 @@ def candle_chart(
         high="High",
         low="Low",
         close="Close",
-        auto_bin=True,
-        bin_width=bin_width,
         title=symbol,
     )
     volume = tvl.histogram(
-        ticks,
+        ohlc,
         timestamp="timestamp",
-        value="size",
-        auto_bin=True,
-        bin_width=bin_width,
-        agg="sum",
+        value="Volume",
         color="rgba(96,165,250,0.5)",
         pane=1,
         title="Volume",
@@ -113,15 +122,13 @@ def tick_chart_interactive():
     view, set_view = ui.use_state("candles")
     symbol, set_symbol = ui.use_state(DEFAULT_SYMBOL)
     window_rows, set_window_rows = ui.use_state(DEFAULT_WINDOW_ROWS)
-    bin_width, set_bin_width = ui.use_state(DEFAULT_BIN_WIDTH)
+    bin_seconds, set_bin_seconds = ui.use_state(DEFAULT_BIN_SECONDS)
     show_coinbase, set_show_coinbase = ui.use_state(True)
     show_bitstamp, set_show_bitstamp = ui.use_state(True)
     show_kraken, set_show_kraken = ui.use_state(True)
 
     exchanges = tuple(
-        ex
-        for ex, shown in zip(EXCHANGES, [show_coinbase, show_bitstamp, show_kraken])
-        if shown
+        ex for ex, shown in zip(EXCHANGES, [show_coinbase, show_bitstamp, show_kraken]) if shown
     )
 
     # Rebuilt only when a control changes, so ticking data does not recreate the chart
@@ -129,10 +136,10 @@ def tick_chart_interactive():
         if not exchanges:
             return None
         if view == "candles":
-            return candle_chart(symbol, window_rows, bin_width, exchanges)
+            return candle_chart(symbol, window_rows, bin_seconds, exchanges)
         return tick_chart(symbol, window_rows, exchanges)
 
-    chart = ui.use_memo(make_chart, [view, symbol, window_rows, bin_width, exchanges])
+    chart = ui.use_memo(make_chart, [view, symbol, window_rows, bin_seconds, exchanges])
 
     def choice(label, value, current, setter):
         # on_press passes an event object first, so the handler must accept and ignore it
@@ -154,7 +161,10 @@ def tick_chart_interactive():
     if view == "candles":
         controls.append(
             ui.button_group(
-                *[choice(label, w, bin_width, set_bin_width) for label, w in BIN_WIDTHS.items()]
+                *[
+                    choice(label, n, bin_seconds, set_bin_seconds)
+                    for label, n in BIN_SECONDS.items()
+                ]
             )
         )
     controls += [
