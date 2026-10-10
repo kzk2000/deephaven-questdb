@@ -24,6 +24,8 @@ TRADES_EXTRA_COLUMNS = (
     ("contract_size", "DOUBLE"),
     ("contract_type", "SYMBOL CAPACITY 16 CACHE"),
     ("notional_usd", "DOUBLE"),
+    # the designated `timestamp` is when we received the row; this is the venue's own time
+    ("exchange_timestamp", "TIMESTAMP_NS"),
 )
 
 
@@ -190,7 +192,8 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
             size_unit SYMBOL CAPACITY 16 CACHE,
             contract_size DOUBLE,
             contract_type SYMBOL CAPACITY 16 CACHE,
-            notional_usd DOUBLE
+            notional_usd DOUBLE,
+            exchange_timestamp TIMESTAMP_NS
         ) TIMESTAMP(timestamp) PARTITION BY HOUR WAL
     """
     result = execute_sql(host, http_port, trades_sql)
@@ -253,7 +256,8 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
             exchange SYMBOL CAPACITY 256 CACHE,
             symbol SYMBOL CAPACITY 256 CACHE,
             bids DOUBLE[][],  -- 2D array: [[prices...], [volumes...]]
-            asks DOUBLE[][]   -- 2D array: [[prices...], [volumes...]]
+            asks DOUBLE[][],  -- 2D array: [[prices...], [volumes...]]
+            exchange_timestamp TIMESTAMP_NS
         ) TIMESTAMP(timestamp) PARTITION BY HOUR WAL
     """
     result = execute_sql(host, http_port, orderbooks_sql)

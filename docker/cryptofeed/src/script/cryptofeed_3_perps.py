@@ -269,6 +269,7 @@ def main():
     reprobe = int(os.environ.get("PERP_REPROBE_SECONDS", "600"))
     questdb_host = "questdb" if os.environ.get("IS_DOCKER") else "127.0.0.1"
     writer = QuestDBWriter(host=questdb_host)
+    print(f"[perps] seeded {writer.seed_seen_trades()} recent trade ids")
 
     handler = FeedHandler()
     enabled, skipped = {}, {}

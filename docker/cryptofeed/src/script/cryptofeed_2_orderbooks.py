@@ -30,7 +30,7 @@ async def write_to_questdb_compact(book, receipt_timestamp):
 
 
 def main():
-    callbacks = {L2_BOOK: [write_to_questdb_compact, cft.my_print]}
+    callbacks = {L2_BOOK: [write_to_questdb_compact, *cft.debug_callbacks()]}
 
     # Use BTC-USD only for testing compact format
     test_symbols = ["BTC-USD"]

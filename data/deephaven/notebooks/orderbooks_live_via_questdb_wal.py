@@ -25,7 +25,7 @@ PAGE_SIZE = 32_000  # Deephaven page size (smaller for orderbooks)
 TRANSPORT = globals().get("TRANSPORT", "qwp")
 # Rows appear once settled, SETTLE_SECONDS after their timestamp, so every row is exact and
 # row positions never move (see qdb_backend.py). latency_seconds below shows that delay.
-SETTLE_SECONDS = globals().get("SETTLE_SECONDS", 3.0)
+SETTLE_SECONDS = globals().get("SETTLE_SECONDS", 0.3)
 # orderbooks has TTL 1 HOUR: QuestDB drops whole hour partitions, after which rows Deephaven
 # re-reads from them come back null. Start 15 min back (None: the whole table).
 HISTORY_SECONDS = globals().get("HISTORY_SECONDS", 900)

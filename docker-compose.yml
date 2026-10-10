@@ -4,7 +4,7 @@ services:
     build:
       context: docker/deephaven
     environment:
-      START_OPTS: -Xmx12g -Dio.deephaven.app.GcApplication.enabled=true -DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler
+      START_OPTS: -Xmx12g -Dio.deephaven.app.GcApplication.enabled=true -DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler -DPeriodicUpdateGraph.targetCycleDurationMillis=250
     ports:
       - "10000:10000"
     volumes:
@@ -59,7 +59,7 @@ services:
       context: docker/cryptofeed
     environment:
       # ms a row may wait in the client buffer; each flush is one QuestDB WAL commit
-      QUESTDB_AUTO_FLUSH_MS: 250
+      QUESTDB_AUTO_FLUSH_MS: 100
     depends_on:
       questdb:
         condition: service_healthy

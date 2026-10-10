@@ -25,7 +25,7 @@ PAGE_SIZE = 64_000  # Deephaven page size
 TRANSPORT = globals().get("TRANSPORT", "qwp")
 # Rows appear once settled, SETTLE_SECONDS after their timestamp, so every row is exact and
 # row positions never move (see qdb_backend.py). latency_seconds below shows that delay.
-SETTLE_SECONDS = globals().get("SETTLE_SECONDS", 3.0)
+SETTLE_SECONDS = globals().get("SETTLE_SECONDS", 0.3)
 
 
 # =============================================================================

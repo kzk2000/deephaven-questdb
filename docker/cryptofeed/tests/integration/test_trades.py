@@ -75,6 +75,7 @@ def test_multiple_trades(writer, mock_trade):
     for i in range(5):
         trade = mock_trade.copy()
         trade["price"] = 50000.0 + i
+        trade["id"] = f"multi-{i}"  # same id would be dropped as a replay
         writer.write_trade(trade)
 
     writer.flush()

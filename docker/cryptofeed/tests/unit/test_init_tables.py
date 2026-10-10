@@ -26,7 +26,14 @@ def test_dedup_sql_is_built_from_the_keys():
 
 def test_trades_has_contract_and_notional_columns():
     names = [name for name, _ in init.TRADES_EXTRA_COLUMNS]
-    assert names == ["size_native", "size_unit", "contract_size", "contract_type", "notional_usd"]
+    assert names == [
+        "size_native",
+        "size_unit",
+        "contract_size",
+        "contract_type",
+        "notional_usd",
+        "exchange_timestamp",
+    ]
 
 
 def test_script_still_exposes_its_entry_points():

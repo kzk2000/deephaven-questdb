@@ -47,9 +47,12 @@ from deephaven.liveness_scope import LivenessScope
 DEFAULT_ORDER_BY_COL = "timestamp"
 DEFAULT_PAGE_SIZE = 64_000
 DEFAULT_TRANSPORT = "qwp"
-# How far the watermark trails min(max(timestamp), now). Measured on the five live feeds (see
-# CLAUDE.md): p99.9 of rows land < 1 s behind, the slowest seen ~1.3 s.
-DEFAULT_SETTLE_SECONDS = 3.0
+# How far the watermark trails min(max(timestamp), now). `timestamp` is the time cryptofeed
+# received the row (the exchange's own time is exchange_timestamp), so a row commits within
+# one client flush interval (QUESTDB_AUTO_FLUSH_MS, 100 ms) plus WAL apply of it: measured on
+# the live feeds the latest row was 0.096 s behind max(timestamp) (trades and orderbooks, 5 min,
+# 8.5k and 40k rows). Tables stamped with the exchange time instead need ~3 s (1-2 s tails).
+DEFAULT_SETTLE_SECONDS = 0.3
 POLL_SECONDS = 0.05
 
 # =============================================================================
@@ -518,7 +521,7 @@ def create_live_table(
 ):
     """A Deephaven table backed by a QuestDB table through TableDataService.
 
-    Rows appear once settled: `settle_seconds` after their timestamp (default 3 s), so every
+    Rows appear once settled: `settle_seconds` after their timestamp (default 0.3 s), so every
     row is exact and positions never move (module docstring). Row order is by timestamp;
     sort explicitly for display.
 

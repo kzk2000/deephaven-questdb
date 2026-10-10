@@ -9,6 +9,8 @@ from src.questdb_writer import QuestDBWriter
 # Initialize QuestDB writer
 questdb_host = "questdb" if os.environ.get("IS_DOCKER") else "127.0.0.1"
 questdb_writer = QuestDBWriter(host=questdb_host)
+# drop replays (Coinbase re-sends its last match on subscribe) of trades already stored
+print(f"seeded {questdb_writer.seed_seen_trades()} recent trade ids")
 
 
 async def write_to_questdb(data, receipt_timestamp):
@@ -28,14 +30,6 @@ async def write_to_questdb(data, receipt_timestamp):
     # Write to QuestDB
     questdb_writer.write_trade(trade_data)
 
-    # Also publish every 100 writes (the writer already auto-flushes every 25 ms over QWP)
-    if not hasattr(write_to_questdb, "counter"):
-        write_to_questdb.counter = 0
-    write_to_questdb.counter += 1
-    if write_to_questdb.counter >= 100:
-        questdb_writer.flush()
-        write_to_questdb.counter = 0
-
 
 def main():
     # cft.SYMBOLS = ['BTC-USD']   # for testing
@@ -46,21 +40,21 @@ def main():
         Coinbase(
             channels=[TRADES],
             symbols=cft.SYMBOLS,
-            callbacks={TRADES: [write_to_questdb, cft.my_print]},
+            callbacks={TRADES: [write_to_questdb, *cft.debug_callbacks()]},
         )
     )
     f.add_feed(
         Bitstamp(
             channels=[TRADES],
             symbols=cft.SYMBOLS,
-            callbacks={TRADES: [write_to_questdb, cft.my_print]},
+            callbacks={TRADES: [write_to_questdb, *cft.debug_callbacks()]},
         )
     )
     f.add_feed(
         Kraken(
             channels=[TRADES],
             symbols=cft.SYMBOLS,
-            callbacks={TRADES: [write_to_questdb, cft.my_print]},
+            callbacks={TRADES: [write_to_questdb, *cft.debug_callbacks()]},
         )
     )
 

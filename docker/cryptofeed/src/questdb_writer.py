@@ -20,6 +20,8 @@ Usage:
     writer.execute_sql("SELECT * FROM trades")  # REST API
 """
 
+import asyncio
+import collections
 import itertools
 import json
 import os
@@ -51,6 +53,8 @@ DEFAULT_PROTOCOL = "ws"
 # buffered and replayed instead of back-pressuring row() (see docs: 10 ms stalled ~2.4 s in a
 # 5 s outage, 25 ms did not).
 DEFAULT_AUTO_FLUSH_INTERVAL_MS = 25
+# Recently written trade ids kept to drop replays (see QuestDBWriter.write_trade)
+SEEN_TRADES_CAPACITY = 500_000
 
 
 class QuestDBWriter:
@@ -103,9 +107,19 @@ class QuestDBWriter:
         self.orderbooks_table = orderbooks_table
         # unique suffix for trades that arrive without an id (see write_trade)
         self._synthetic_ids = itertools.count(1)
+        # (exchange, symbol, trade_id) of recent trades: a replay gets a fresh receipt
+        # timestamp, so the table's DEDUP (which keys on timestamp) cannot catch it
+        self._seen_trades = collections.OrderedDict()
+        self.replays_skipped = 0
         # rows/frames the server rejected (QWP reports these asynchronously)
         self._rejections = [0]
         self._error_handler = _rejection_handler(self._rejections)
+
+        # The SDK checks auto_flush_interval only when the next row is appended, so the last
+        # row of a quiet feed would wait for the next one (seconds). A flush is therefore also
+        # armed on the event loop whenever a row is written (see _arm_flush).
+        self._flush_interval_s = float(auto_flush_interval_ms) / 1000.0
+        self._flush_armed = False
 
         # Build configuration string for the SDK
         self.conf = f"{protocol}::addr={host}:{ilp_port};"
@@ -137,6 +151,30 @@ class QuestDBWriter:
         not as exceptions from row())."""
         return self._rejections[0]
 
+    def _arm_flush(self):
+        """Publish buffered rows within the flush interval even if no further row arrives.
+
+        Called from the feed callbacks, i.e. on the event loop thread, so the SDK sender is
+        only ever touched from one thread. Outside a running loop (sync callers, tests) it is
+        a no-op and the SDK's own triggers apply.
+        """
+        if self._flush_armed or self.protocol not in ("ws", "wss"):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._flush_armed = True
+        loop.call_later(self._flush_interval_s, self._timed_flush)
+
+    def _timed_flush(self):
+        self._flush_armed = False
+        try:
+            if self._sender is not None:
+                self._sender.flush()
+        except Exception as e:  # never let a flush error escape into the loop
+            print(f"Error flushing QuestDB writer: {e}")
+
     # =========================================================================
     # Row writers (for both trades and orderbooks)
     # =========================================================================
@@ -164,13 +202,26 @@ class QuestDBWriter:
             else:
                 trade_id = str(trade_id)
             timestamp = data.get("timestamp")
-            receipt_timestamp = data["receipt_timestamp"]
+            receipt_timestamp = data.get("receipt_timestamp") or timestamp
+            if not receipt_timestamp:
+                receipt_timestamp = time.time()
 
-            # Exchange timestamp, falling back to receipt time (seconds -> nanoseconds)
-            if timestamp:
-                ts_nanos = TimestampNanos(int(timestamp * 1_000_000_000))
-            else:
-                ts_nanos = TimestampNanos(int(receipt_timestamp * 1_000_000_000))
+            # Replays: the exchange re-sends its last trade on (re)subscribe and the client may
+            # redeliver after a reconnect. The designated timestamp is the receipt time, so
+            # a replayed trade is a new row to the table's DEDUP; recognise it here instead.
+            if not trade_id.startswith("rx-"):
+                key = (exchange, symbol, trade_id)
+                if key in self._seen_trades:
+                    self.replays_skipped += 1
+                    return
+                self._seen_trades[key] = None
+                if len(self._seen_trades) > SEEN_TRADES_CAPACITY:
+                    self._seen_trades.popitem(last=False)
+
+            # The designated timestamp is when we received the trade: rows then commit in
+            # (nearly) timestamp order, so a reader can publish a prefix of the table
+            # almost immediately. The exchange's own time is kept as exchange_timestamp.
+            ts_nanos = TimestampNanos(int(receipt_timestamp * 1_000_000_000))
 
             symbols = {
                 "exchange": exchange,
@@ -182,6 +233,8 @@ class QuestDBWriter:
                 "size": size,
                 "trade_id": trade_id,
             }
+            if timestamp:
+                columns["exchange_timestamp"] = TimestampNanos(int(timestamp * 1_000_000_000))
             # Contract columns. Derivative feeds pass their own (see perps.py: `size` is already
             # base coin and size_native / contract_size / notional_usd describe the venue's
             # number). Spot rows get the identity values so notional and volume queries work
@@ -201,6 +254,7 @@ class QuestDBWriter:
                 columns=columns,
                 at=ts_nanos,
             )
+            self._arm_flush()
 
         except Exception as e:
             print(f"Error writing trade to QuestDB: {e}")
@@ -235,10 +289,13 @@ class QuestDBWriter:
             # Extract data
             exchange = book.exchange
             symbol = symbol or book.symbol
-            timestamp = book.timestamp or receipt_timestamp
+            exchange_timestamp = book.timestamp
 
-            # Convert to nanoseconds
-            ts_nanos = TimestampNanos(int(timestamp * 1_000_000_000))
+            # Designated timestamp: receipt time (see write_trade); the exchange's time, when
+            # it gives one, is kept as exchange_timestamp
+            ts_nanos = TimestampNanos(
+                int((receipt_timestamp or exchange_timestamp) * 1_000_000_000)
+            )
 
             # Determine depth
             max_bids = len(book.book.bids)
@@ -289,12 +346,18 @@ class QuestDBWriter:
             asks_2d = np.array([ask_prices, ask_volumes], dtype=np.float64)
 
             # Send via SDK (sender always exists from __init__)
+            columns = {"bids": bids_2d, "asks": asks_2d}
+            if exchange_timestamp:
+                columns["exchange_timestamp"] = TimestampNanos(
+                    int(exchange_timestamp * 1_000_000_000)
+                )
             self._sender.row(
                 self.orderbooks_table,
                 symbols={"exchange": exchange, "symbol": symbol},
-                columns={"bids": bids_2d, "asks": asks_2d},
+                columns=columns,
                 at=ts_nanos,
             )
+            self._arm_flush()
 
             return True
 
@@ -304,6 +367,25 @@ class QuestDBWriter:
 
             traceback.print_exc()
             return False
+
+    def seed_seen_trades(self, hours=6, limit=SEEN_TRADES_CAPACITY):
+        """Load the ids of recent trades from QuestDB so replays after a restart are dropped.
+
+        Coinbase re-sends its last match on every subscribe, which can be hours old on a quiet
+        symbol. Best effort: a failure only means a replay may be stored twice.
+        """
+        try:
+            result = self.execute_sql(
+                "SELECT exchange, symbol, trade_id FROM trades "
+                f"WHERE timestamp > dateadd('h', -{int(hours)}, now()) LIMIT {int(limit)}"
+            )
+            rows = (result or {}).get("dataset") or []
+            for exchange, symbol, trade_id in rows:
+                self._seen_trades[(exchange, symbol, str(trade_id))] = None
+            return len(rows)
+        except Exception as e:
+            print(f"Could not seed recent trade ids: {e}")
+            return 0
 
     # =========================================================================
     # REST API for queries
@@ -356,6 +438,7 @@ class QuestDBWriter:
                 },
                 at=TimestampNanos(int(timestamp * 1_000_000_000)),
             )
+            self._arm_flush()
             return True
         except Exception as e:
             print(f"Error writing row to {table}: {e}")
