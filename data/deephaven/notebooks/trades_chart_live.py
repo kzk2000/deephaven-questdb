@@ -1,20 +1,24 @@
 """
-Live trades chart for Deephaven
+Live TradingView Lightweight Charts for Deephaven
 
-Displays real-time tick trades from QuestDB as a native Deephaven line plot,
-one line per exchange (Coinbase, Bitstamp, Kraken), with interactive controls.
+Real-time trades from QuestDB, drawn with the official
+deephaven-plugin-tradingview-lightweight plugin (TradingView Lightweight Charts).
 
-deephaven.ui cannot embed custom JavaScript (there is no html.script / html.iframe),
-so this uses deephaven.plot.express, which updates live as new trades arrive.
+Two views, switchable in the UI:
+    - Candles: OHLC candlesticks autobinned server-side from raw ticks, with a
+      volume histogram in a second pane
+    - Ticks:   raw trade prices, one line per exchange
 
 Usage:
     exec(open('/data/storage/notebooks/trades_chart_live.py').read())
 
 Widgets created:
-    - chart_interactive: chart with symbol / exchange / window-size controls
+    - chart_interactive: chart with symbol / view / bin / window / exchange controls
+    - chart_candles:     BTC-USD 5s candles with volume (fixed layout, live data)
+    - chart_ticks:       BTC-USD tick lines per exchange (fixed layout, live data)
 """
 
-import deephaven.plot.express as dx
+import deephaven.plot.tradingview_lightweight as tvl
 import deephaven.ui as ui
 from qdb_backend import create_live_table
 
@@ -24,97 +28,144 @@ from qdb_backend import create_live_table
 
 DEFAULT_SYMBOL = "BTC-USD"
 DEFAULT_WINDOW_ROWS = 1000
+DEFAULT_BIN_WIDTH = "PT5S"
 SYMBOLS = ["BTC-USD", "ETH-USD", "AVAX-USD", "SOL-USD"]
-WINDOW_SIZES = [100, 500, 1000, 5000]
-
-# Exchange names are upper case in QuestDB
-EXCHANGE_COLORS = {
-    "COINBASE": "#0088CC",  # Blue
-    "BITSTAMP": "#00AA44",  # Green
-    "KRAKEN": "#FF6600",  # Orange
-}
+WINDOW_SIZES = [500, 1000, 5000]
+BIN_WIDTHS = {"1s": "PT1S", "5s": "PT5S", "30s": "PT30S", "1m": "PT1M"}
+EXCHANGES = ["COINBASE", "BITSTAMP", "KRAKEN"]  # upper case in QuestDB
 
 # Live QuestDB-backed table (the backend registry makes re-running this file safe)
 trades_live = create_live_table("trades", refreshing=True)
 
 
 # =============================================================================
-# Components
+# Chart builders
+# =============================================================================
+
+
+def recent_trades(symbol, window_rows, exchanges):
+    """Last `window_rows` trades for `symbol` on the given exchanges (live)."""
+    names = ", ".join(f"`{ex}`" for ex in exchanges)
+    return trades_live.where([f"symbol = `{symbol}`", f"exchange in {names}"]).tail(window_rows)
+
+
+def candle_chart(
+    symbol=DEFAULT_SYMBOL,
+    window_rows=DEFAULT_WINDOW_ROWS,
+    bin_width=DEFAULT_BIN_WIDTH,
+    exchanges=tuple(EXCHANGES),
+):
+    """OHLC candles autobinned from ticks, with a volume histogram in pane 1."""
+    ticks = recent_trades(symbol, window_rows, exchanges)
+    # Raw ticks have one price; the engine reduces first/max/min/last per bin
+    ohlc = ticks.update_view(["Open = price", "High = price", "Low = price", "Close = price"])
+    candles = tvl.candlestick(
+        ohlc,
+        timestamp="timestamp",
+        open="Open",
+        high="High",
+        low="Low",
+        close="Close",
+        auto_bin=True,
+        bin_width=bin_width,
+        title=symbol,
+    )
+    volume = tvl.histogram(
+        ticks,
+        timestamp="timestamp",
+        value="size",
+        auto_bin=True,
+        bin_width=bin_width,
+        agg="sum",
+        color="rgba(96,165,250,0.5)",
+        pane=1,
+        title="Volume",
+    )
+    return tvl.chart(
+        candles,
+        volume,
+        pane_stretch_factors=[3, 1],
+        time_scale=tvl.time_scale(time_visible=True, seconds_visible=True),
+    )
+
+
+def tick_chart(
+    symbol=DEFAULT_SYMBOL,
+    window_rows=DEFAULT_WINDOW_ROWS,
+    exchanges=tuple(EXCHANGES),
+):
+    """Raw trade prices, one line per exchange."""
+    ticks = recent_trades(symbol, window_rows, exchanges)
+    return tvl.chart(
+        tvl.line(ticks, timestamp="timestamp", value="price", by="exchange"),
+        time_scale=tvl.time_scale(time_visible=True, seconds_visible=True),
+    )
+
+
+# =============================================================================
+# Interactive component
 # =============================================================================
 
 
 @ui.component
-def tick_chart(symbol=DEFAULT_SYMBOL, window_rows=DEFAULT_WINDOW_ROWS, exchanges=None):
-    """Line plot of the last `window_rows` trades of `symbol`, one line per exchange."""
-    exchanges = tuple(exchanges) if exchanges else tuple(EXCHANGE_COLORS)
-
-    def make_figure():
-        names = ", ".join(f"`{ex}`" for ex in exchanges)
-        recent = trades_live.where([f"symbol = `{symbol}`", f"exchange in {names}"]).tail(
-            window_rows
-        )
-        return dx.line(
-            recent,
-            x="timestamp",
-            y="price",
-            by="exchange",
-            color_discrete_map=EXCHANGE_COLORS,
-            title=f"Live trades: {symbol} (last {window_rows})",
-        )
-
-    return ui.use_memo(make_figure, [symbol, window_rows, exchanges])
-
-
-@ui.component
 def tick_chart_interactive():
-    """Chart with symbol, exchange and window-size controls."""
+    """Chart with view, symbol, bin width, window size and exchange controls."""
+    view, set_view = ui.use_state("candles")
     symbol, set_symbol = ui.use_state(DEFAULT_SYMBOL)
     window_rows, set_window_rows = ui.use_state(DEFAULT_WINDOW_ROWS)
+    bin_width, set_bin_width = ui.use_state(DEFAULT_BIN_WIDTH)
     show_coinbase, set_show_coinbase = ui.use_state(True)
     show_bitstamp, set_show_bitstamp = ui.use_state(True)
     show_kraken, set_show_kraken = ui.use_state(True)
 
-    exchanges = []
-    if show_coinbase:
-        exchanges.append("COINBASE")
-    if show_bitstamp:
-        exchanges.append("BITSTAMP")
-    if show_kraken:
-        exchanges.append("KRAKEN")
+    exchanges = tuple(
+        ex
+        for ex, shown in zip(EXCHANGES, [show_coinbase, show_bitstamp, show_kraken])
+        if shown
+    )
 
-    symbol_buttons = [
-        ui.button(
-            s,
-            key=s,
-            on_press=lambda _event, s=s: set_symbol(s),
-            variant="accent" if symbol == s else "secondary",
+    # Rebuilt only when a control changes, so ticking data does not recreate the chart
+    def make_chart():
+        if not exchanges:
+            return None
+        if view == "candles":
+            return candle_chart(symbol, window_rows, bin_width, exchanges)
+        return tick_chart(symbol, window_rows, exchanges)
+
+    chart = ui.use_memo(make_chart, [view, symbol, window_rows, bin_width, exchanges])
+
+    def choice(label, value, current, setter):
+        # on_press passes an event object first, so the handler must accept and ignore it
+        return ui.button(
+            label,
+            key=f"{label}-{value}",
+            on_press=lambda _event, v=value: setter(v),
+            variant="accent" if current == value else "secondary",
         )
-        for s in SYMBOLS
+
+    controls = [
+        ui.button_group(
+            choice("Candles", "candles", view, set_view),
+            choice("Ticks", "ticks", view, set_view),
+        ),
+        ui.button_group(*[choice(s, s, symbol, set_symbol) for s in SYMBOLS]),
+        ui.button_group(*[choice(str(n), n, window_rows, set_window_rows) for n in WINDOW_SIZES]),
     ]
-    window_buttons = [
-        ui.button(
-            str(n),
-            key=str(n),
-            on_press=lambda _event, n=n: set_window_rows(n),
-            variant="accent" if window_rows == n else "secondary",
+    if view == "candles":
+        controls.append(
+            ui.button_group(
+                *[choice(label, w, bin_width, set_bin_width) for label, w in BIN_WIDTHS.items()]
+            )
         )
-        for n in WINDOW_SIZES
+    controls += [
+        ui.checkbox("Coinbase", is_selected=show_coinbase, on_change=set_show_coinbase),
+        ui.checkbox("Bitstamp", is_selected=show_bitstamp, on_change=set_show_bitstamp),
+        ui.checkbox("Kraken", is_selected=show_kraken, on_change=set_show_kraken),
     ]
 
     return ui.flex(
-        ui.flex(
-            ui.button_group(*symbol_buttons),
-            ui.button_group(*window_buttons),
-            ui.checkbox("Coinbase", is_selected=show_coinbase, on_change=set_show_coinbase),
-            ui.checkbox("Bitstamp", is_selected=show_bitstamp, on_change=set_show_bitstamp),
-            ui.checkbox("Kraken", is_selected=show_kraken, on_change=set_show_kraken),
-            gap="size-200",
-            wrap=True,
-            align_items="center",
-        ),
-        tick_chart(symbol=symbol, window_rows=window_rows, exchanges=exchanges)
-        if exchanges
-        else ui.text("Select at least one exchange"),
+        ui.flex(*controls, gap="size-200", wrap=True, align_items="center"),
+        chart if chart is not None else ui.text("Select at least one exchange"),
         direction="column",
         flex_grow=1,
     )
@@ -125,6 +176,7 @@ def tick_chart_interactive():
 # =============================================================================
 
 chart_interactive = tick_chart_interactive()
-chart = tick_chart(symbol=DEFAULT_SYMBOL)
+chart_candles = candle_chart()
+chart_ticks = tick_chart()
 
-print("[OK] 'chart_interactive' (controls + chart) and 'chart' (BTC-USD, all exchanges) created")
+print("[OK] 'chart_interactive', 'chart_candles' and 'chart_ticks' created")

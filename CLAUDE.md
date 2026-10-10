@@ -13,7 +13,7 @@ Exchanges -> cryptofeed -> ILP/HTTP (questdb:9000) -> QuestDB 10.0.1 (WAL tables
 - `./data/deephaven` is mounted at `/data/storage`; notebooks are at `/data/storage/notebooks` (on PYTHONPATH). `./data/questdb` is QuestDB data (gitignored).
 - Schema (`docker/cryptofeed/src/init_questdb_tables.py`):
   - `trades`: TIMESTAMP_NS, SYMBOL cols, `price`, `size`, `trade_id`; PARTITION BY DAY, WAL.
-  - `orderbooks`: `bids`/`asks` as `DOUBLE[][]` ([[prices],[sizes]]); PARTITION BY HOUR, WAL, 1h TTL.
+  - `orderbooks`: `bids`/`asks` as `DOUBLE[][]` ([[prices],[sizes]]); PARTITION BY HOUR, WAL, TTL 1 HOURS (QuestDB's minimum TTL unit is HOUR and TTL must be a multiple of the partition size; the view `orderbooks_1s` keeps the downsampled history). An existing DAY-partitioned table must be dropped (with `orderbooks_1s`) and recreated; stop cryptofeed first or ILP auto-creates it with defaults.
   - Materialized view `orderbooks_1s` (SAMPLE BY 1s).
 
 ## Key files
@@ -23,10 +23,10 @@ Exchanges -> cryptofeed -> ILP/HTTP (questdb:9000) -> QuestDB 10.0.1 (WAL tables
 - `docker/cryptofeed/Dockerfile`: python:3.12; overwrites cryptofeed's `coinbase.py` with `src/coinbase.py` (uses undocumented Coinbase endpoints to avoid auth).
 - `docker/cryptofeed/src/script/cryptofeed_0_startup.sh`: init tables, sleep 2s, launch trades/orderbooks feeds, restart on death.
 - `src/questdb_writer.py`: `QuestDBWriter` (questdb SDK `Sender`, HTTP ILP). `write_trade`, `write_orderbook` (2D numpy), `execute_sql` (REST). `questdb_writer_queued.py` is mostly commented out.
-- `docker/deephaven/Dockerfile`: pip installs connectorx, sqlalchemy, psycopg2, polars. The old `TableDataService` callback patch was removed (fixed upstream in 42.6; see `docs/DEEPHAVEN_BUG_REPORT.md`).
+- `docker/deephaven/Dockerfile`: pip installs connectorx, sqlalchemy, psycopg2, polars and `deephaven-plugin-tradingview-lightweight==0.0.1` (TradingView charts; alpha). The old `TableDataService` callback patch was removed (fixed upstream in 42.6; see `docs/DEEPHAVEN_BUG_REPORT.md`).
 - `data/deephaven/notebooks/qdb.py`: static access via ConnectorX (`redshift://...:8812`). `run_query`, `to_table()` (timestamp[us] -> timestamp[ns, tz=UTC], large_list -> list), `get_trades`, `get_candles`, `get_orderbooks`, `get_engine()` (SQLAlchemy, for live).
 - `notebooks/qdb_backend.py`: `QuestDBBackend(TableDataServiceBackend)`. One backend per table in a module-global registry (re-runnable notebooks). Polls `wal_transactions()` every 50ms, falls back to `count(*)`; pages with `ROW_NUMBER() OVER (ORDER BY timestamp)`. API: `create_live_table`, `set_verbose`, `stop_monitoring`.
-- Notebooks: static `trades_static.py`, `orderbooks_static.py`; live `trades_live_via_questdb_wal.py`, `orderbooks_live_via_questdb_wal.py` (add `latency_seconds`); charts `trades_chart_live.py`, `trades_chart_simple.py`.
+- Notebooks: static `trades_static.py`, `orderbooks_static.py`; live `trades_live_via_questdb_wal.py`, `orderbooks_live_via_questdb_wal.py` (add `latency_seconds`); charts `trades_chart_live.py` (TradingView candles + volume, tick lines; `tvl` plugin, no `tvl.legend` in 0.0.1), `trades_chart_simple.py`.
 - `validation/` ad-hoc checks; `docs/` status, orderbooks, bug report, `history/`; `docker/cryptofeed/tests/` unit/integration/simulation + `run_tests.sh`.
 
 ## How to run
