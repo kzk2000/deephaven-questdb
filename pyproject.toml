@@ -2,7 +2,7 @@
 name = "deephaven-questdb"
 version = "0.1.0"
 description = "Deephaven + QuestDB real-time streaming"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [
     {name = "kzk2000"}
 ]
@@ -37,8 +37,10 @@ build-backend = "hatchling.build"
 bypass-selection = true
 
 [tool.ruff]
+# Lowest interpreter that runs this code: Deephaven server-ui 42.6 is Python 3.12 (notebooks);
+# the cryptofeed image is 3.13
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 required-version = "==0.17.0"
 # Python only: ruff would otherwise reformat code blocks in the markdown docs
 extend-exclude = ["*.md", "data/questdb"]
