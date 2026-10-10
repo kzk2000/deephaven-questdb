@@ -1,6 +1,9 @@
 # Makefile for Deephaven-QuestDB project
 
-.PHONY: help build build_with_drop up down clean rebuild logs ps test format
+# bash is required for `read -n` and `[[ ]]` in the clean target
+SHELL := /bin/bash
+
+.PHONY: help build build_with_drop up down restart clean rebuild ps logs logs-dh logs-qdb logs-cf test urls format
 
 help:
 	@echo "Deephaven-QuestDB Development Commands"
@@ -103,7 +106,7 @@ logs:
 
 # Show Deephaven logs
 logs-dh:
-	docker compose logs --tail=100 -f deephaven_qdb
+	docker compose logs --tail=100 -f deephaven
 
 # Show QuestDB logs
 logs-qdb:
@@ -128,7 +131,7 @@ test:
 	@curl -s "http://localhost:9000/exec?query=SELECT%20count%28%2A%29%20FROM%20orderbooks_1s" 2>/dev/null | grep -q "count" && echo "✓ orderbooks_1s view exists" || echo "✗ orderbooks_1s view not ready"
 	@echo ""
 	@echo "Table row counts:"
-	@python3 -c "import sys; sys.path.insert(0, 'docker/cryptofeed/src'); from questdb_writer import QuestDBWriter; w = QuestDBWriter('localhost', verbose=False); r = w.execute_sql('SELECT count() FROM trades'); print(f\"  trades:        {r['dataset'][0][0]:>6} rows\"); r = w.execute_sql('SELECT count() FROM orderbooks'); print(f\"  orderbooks:    {r['dataset'][0][0]:>6} rows\"); r = w.execute_sql('SELECT count() FROM orderbooks_1s'); print(f\"  orderbooks_1s: {r['dataset'][0][0]:>6} rows\"); w.close()" 2>/dev/null || echo "  (Python check failed)"
+	@python3 -c "import json, urllib.parse, urllib.request as u; q = lambda t: json.load(u.urlopen('http://localhost:9000/exec?query=' + urllib.parse.quote('SELECT count() FROM ' + t)))['dataset'][0][0]; [print(f'  {t:<14} {q(t):>9} rows') for t in ('trades', 'orderbooks', 'orderbooks_1s')]" 2>/dev/null || echo "  (row count query failed - is QuestDB up?)"
 
 # Show service URLs
 urls:
@@ -138,7 +141,8 @@ urls:
 	@echo ""
 	@echo "Database Connections:"
 	@echo "  QuestDB PostgreSQL: localhost:8812 (user=admin, pass=quest)"
-	@echo "  QuestDB ILP:        localhost:9009"
+	@echo "  QuestDB ILP (HTTP): http://localhost:9000 (used by cryptofeed)"
+	@echo "  QuestDB ILP (TCP):  localhost:9009 (exposed, unused)"
 
 # Format Python code with ruff (via uvx)
 format:
