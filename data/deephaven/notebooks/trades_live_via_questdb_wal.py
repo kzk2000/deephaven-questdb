@@ -20,6 +20,9 @@ from qdb_backend import create_live_table, stop_monitoring
 TARGET_TABLE_NAME = "trades"  # QuestDB table to stream
 ORDER_BY_COL = "timestamp"  # Order column (usually timestamp)
 PAGE_SIZE = 64_000  # Deephaven page size
+# "pg": Postgres wire (default); "qwp": Arrow pages over QuestDB's WebSocket protocol, which
+# pages ~20-40x cheaper (see qdb_qwp.py). Set TRANSPORT before running to override.
+TRANSPORT = globals().get("TRANSPORT", "pg")
 
 
 # =============================================================================
@@ -30,6 +33,7 @@ trades = create_live_table(
     page_size=PAGE_SIZE,
     refreshing=True,
     use_liveness_scope=True,
+    transport=TRANSPORT,
 ).sort_descending(order_by=["timestamp"])
 
 trades = trades.update_view(

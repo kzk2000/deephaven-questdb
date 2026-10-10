@@ -118,16 +118,29 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         order_by_col: str = DEFAULT_ORDER_BY_COL,
         table_name: str = None,
         verbose: bool = False,
+        transport: str = "pg",
     ):
         super().__init__()
+        if transport not in ("pg", "qwp"):
+            raise ValueError(f"transport must be 'pg' or 'qwp', got {transport!r}")
         self._order_by_col = order_by_col
         self._table_name = table_name
         self._verbose = verbose
+        self._transport = transport
+        # QWP reads: Arrow batches over WebSocket, LIMIT lo,hi paging (see qdb_qwp.py)
+        self._qwp = None
+        if transport == "qwp":
+            import qdb_qwp
+
+            # Deephaven rejects nested DOUBLE[][] columns, so arrays are rendered as strings, which is
+            # what the Postgres-wire path produced
+            self._qwp = qdb_qwp.QwpReader(flatten_arrays=True)
         self._active_threads = {}
         self._lock = threading.Lock()
 
         print(
-            f"[Backend] Created new QuestDBBackend instance (id={id(self)}, table='{table_name}')"
+            f"[Backend] Created new QuestDBBackend instance (id={id(self)}, table='{table_name}', "
+            f"transport={transport})"
         )
 
     def __del__(self):
@@ -174,24 +187,37 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         table_name: str,
         order_by_col: str = DEFAULT_ORDER_BY_COL,
         verbose: bool = False,
+        transport: str = "pg",
     ):
         """Get existing backend for table or create new one (singleton pattern)"""
         with _GLOBAL_BACKEND_LOCK:
             if table_name in _GLOBAL_BACKENDS_BY_TABLE:
                 existing = _GLOBAL_BACKENDS_BY_TABLE[table_name]
+                if existing._transport != transport:
+                    print(
+                        f"[Backend] WARNING: reusing '{table_name}' backend with transport="
+                        f"{existing._transport!r} (requested {transport!r}); call "
+                        f"stop_monitoring() first to switch"
+                    )
                 print(
                     f"[Backend] Reusing existing backend for table '{table_name}' (id={id(existing)})"
                 )
                 return existing
             else:
                 print(f"[Backend] Creating new backend for table '{table_name}'...")
-                new_backend = cls(order_by_col=order_by_col, table_name=table_name, verbose=verbose)
+                new_backend = cls(
+                    order_by_col=order_by_col,
+                    table_name=table_name,
+                    verbose=verbose,
+                    transport=transport,
+                )
                 _GLOBAL_BACKENDS_BY_TABLE[table_name] = new_backend
                 return new_backend
 
     @classmethod
     def cleanup_all(cls):
         """Stop all threads across all backend instances"""
+        backends_to_cleanup = []
         with _GLOBAL_BACKEND_LOCK:
             if _GLOBAL_BACKENDS_BY_TABLE:
                 print(
@@ -237,7 +263,11 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         """
         Introspect QuestDB using information_schema.columns and build a PyArrow schema.
         We exclude the hidden _rowid from the public schema but still use it internally.
+        With transport="qwp" the exact Arrow schema comes from a zero-row query instead.
         """
+        if self._qwp is not None:
+            return self._qwp.schema(table_name)
+
         q = """
         SELECT column_name, data_type
         FROM information_schema.columns
@@ -342,7 +372,12 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         """
         Get current row count for this table using WAL transactions.
         This is more efficient than count(*) for WAL-enabled tables.
+        With transport="qwp" this is a plain count(): SUM(rowCount) over wal_transactions
+        over-counts once TTL has dropped partitions.
         """
+        if self._qwp is not None:
+            return self._qwp.row_count(table_name)
+
         engine = qdb.get_engine()
         with engine.connect() as conn:
             with conn.connection.cursor() as cur:
@@ -379,6 +414,10 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         try:
             assert isinstance(table_key, QuestDBTableKey)
             table_name = table_key.table_name
+
+            if self._qwp is not None:
+                self._wal_watch_loop_qwp(table_name, size_cb, success_cb, stop_event)
+                return
 
             # Initial: get table size and latest transaction
             last_size = 0
@@ -510,6 +549,31 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         except Exception as e:
             failure_cb(e)
 
+    def _wal_watch_loop_qwp(self, table_name, size_cb, success_cb, stop_event):
+        """
+        Change detection over QWP. QWP has no subscribe/tail API, so this still polls, but a
+        count() round trip costs ~0.4 ms. Polling the applied row count directly (rather than
+        waiting for a new WAL transaction id) means rows are announced as soon as QuestDB has
+        applied them: a transaction id moves before its rows are visible, and the next id may
+        be seconds away on a sparse symbol.
+        """
+        last_size = self._qwp.row_count(table_name)
+        size_cb(last_size)
+        success_cb()
+        print(f"[QWP Backend:{table_name}] Starting monitoring, initial size: {last_size:,}")
+
+        while not stop_event.is_set():
+            time.sleep(WAL_IDLE_SLEEP_SEC)
+            size = self._qwp.row_count(table_name)
+            if size > last_size:
+                if self._verbose:
+                    print(
+                        f"[QWP Backend:{table_name}] size {last_size:,} -> {size:,} "
+                        f"(+{size - last_size:,})"
+                    )
+                last_size = size
+                size_cb(size)
+
     def table_location_size(self, table_key, table_location_key, size_cb, failure_cb):
         """
         Static size (non-refreshing use).
@@ -608,6 +672,11 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
                     f"[Backend:{table_name}] [{ts}] column_values: col={col}, offset={offset}, max_rows={max_rows}"
                 )
 
+            if self._qwp is not None:
+                # Columnar Arrow page straight from QuestDB: no row loop, no ROW_NUMBER() scan
+                values_cb(self._qwp.page(table_name, col, offset, max_rows, self._order_by_col))
+                return
+
             # Use ROW_NUMBER() since QuestDB doesn't support OFFSET
             sql = f"""
                 WITH numbered AS (
@@ -698,6 +767,7 @@ def create_live_table(
     refreshing: bool = True,
     verbose: bool = False,
     use_liveness_scope: bool = True,
+    transport: str = "pg",
 ):
     """
     Create a live Deephaven table backed by QuestDB.
@@ -709,6 +779,8 @@ def create_live_table(
         refreshing: Whether to enable live updates (default: True)
         verbose: Enable verbose logging of transaction updates (default: False)
         use_liveness_scope: Whether to wrap table creation in LivenessScope (default: True)
+        transport: "pg" (Postgres wire, default) or "qwp" (QuestDB WebSocket protocol:
+            Arrow pages via LIMIT lo,hi; see qdb_qwp.py)
 
     Returns:
         Deephaven table object
@@ -719,7 +791,7 @@ def create_live_table(
         trades = create_live_table('trades', use_liveness_scope=False)  # No scope management
     """
     backend = QuestDBBackend.get_or_create(
-        table_name=table_name, order_by_col=order_by_col, verbose=verbose
+        table_name=table_name, order_by_col=order_by_col, verbose=verbose, transport=transport
     )
 
     tds = TableDataService(backend=backend, page_size=page_size)
