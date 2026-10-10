@@ -199,21 +199,18 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     print(f"\n  Verifying table schemas...")
 
     # Verify trades table schema
-    trades_schema_sql = "SELECT columns() FROM trades WHERE name='trades'"
-    result = execute_sql(host, http_port, trades_schema_sql)
-    if result and "dataset" in result:
+    result = execute_sql(host, http_port, "SELECT \"column\", type FROM table_columns('trades')")
+    if result and result.get("dataset"):
         print(f"    ✅ trades table schema verified")
-        # Print key columns for verification
-        columns = result["dataset"]
-        print(f"      Columns: {[col['name'] for col in columns]}")
+        print(f"      Columns: {[col[0] for col in result['dataset']]}")
 
     # Verify orderbooks table schema
-    ob_schema_sql = "SELECT columns() FROM orderbooks WHERE name='orderbooks'"
-    result = execute_sql(host, http_port, ob_schema_sql)
-    if result and "dataset" in result:
+    result = execute_sql(
+        host, http_port, "SELECT \"column\", type FROM table_columns('orderbooks')"
+    )
+    if result and result.get("dataset"):
         print(f"    ✅ orderbooks table schema verified")
-        columns = result["dataset"]
-        array_columns = [col["name"] for col in columns if "DOUBLE[][]" in col["type"]]
+        array_columns = [col[0] for col in result["dataset"] if "[]" in col[1]]
         if array_columns:
             print(f"      Array columns: {array_columns}")
 
