@@ -67,6 +67,7 @@ See [history/2024-12-refactoring/](history/2024-12-refactoring/) for detailed re
 ## Known Issues
 
 ### Deephaven `TableDataService` bug (fixed)
+Fixed upstream as of server-ui 42.6; the image no longer patches it.
 
 ### TradingView plugin
 `deephaven-plugin-tradingview-lightweight` is alpha (0.0.1). It has no `tvl.legend`, and its `auto_bin` stretched the candle price axis, so `trades_chart_live.py` bins candles with `agg_by`.
@@ -125,22 +126,3 @@ docker logs deephaven
 - [Orderbooks Guide](orderbooks.md) - How orderbooks work
 - [End-to-end verification (Dec 2025 snapshot)](history/2025-12-end-to-end-verification.md)
 - [Change History](history/) - Migration and refactoring logs
-
-## Next Steps
-
-The system is production-ready. Potential future improvements:
-1. Performance monitoring/metrics
-2. Additional validation tests
-3. Documentation updates as needed
-4. Explore Deephaven WAL fix when available
-
-## Status Summary
-
-🟢 **All Systems Operational**
-
-- Data flowing correctly
-- Schema preserved
-- Zero breaking changes
-- Code simplified and maintainable
-- Comprehensive test coverage
-- Full documentation

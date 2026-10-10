@@ -32,7 +32,6 @@ See [history/](history/) for detailed migration and refactoring logs:
 docs/
 ├── README.md                       # This file
 ├── CURRENT_STATUS.md               # System status and architecture
-├── DEEPHAVEN_BUG_REPORT.md         # Known issues
 ├── orderbooks.md                   # Orderbook format and retention
 └── history/                        # Change history
     ├── 2024-12-refactoring/       # Refactoring logs
