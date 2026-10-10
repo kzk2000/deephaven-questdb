@@ -178,11 +178,13 @@ def live_trades_viewer():
         if has_error
         else None,
         # Summary statistics
-        # ui.view(
-        #     ui.heading("Summary Statistics", level=3),
-        #     ui.table(summary) if summary is not None else ui.text("No data"),
-        #     margin_bottom=20
-        # ) if not has_error else None,
+        ui.view(
+            ui.heading("Summary Statistics", level=3),
+            ui.table(summary) if summary is not None else ui.text("No data"),
+            margin_bottom=20,
+        )
+        if not has_error
+        else None,
         # Live trades table
         ui.view(
             ui.heading(f"Live Trades: {symbol}", level=3),

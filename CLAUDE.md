@@ -40,8 +40,5 @@ Exchanges -> cryptofeed -> ILP/HTTP (questdb:9000) -> QuestDB 10.0.1 (WAL tables
 - **Timestamp precision**: tables must be TIMESTAMP_NS. If ILP writes beat the DDL, QuestDB auto-creates microsecond tables (fixed in 7b0bf73 with IF NOT EXISTS, 2s sleep, schema check). Deephaven rejects MICROSECOND units, so static loads must go through `qdb.to_table()`.
 - **Two connection paths**: static notebooks use ConnectorX (`get_connection()` returns a string); live notebooks use SQLAlchemy via `get_engine()`. Mixing them gives `'str' has no attribute 'connect'`.
 - **Column naming**: cryptofeed's `amount` is stored as `size`.
-- **Known Makefile bugs**: `logs-dh` uses service `deephaven_qdb` (should be `deephaven`); `clean` uses bash `[[ ]]` under `/bin/sh`; `urls` lists ILP on 9009 but writer uses HTTP on 9000.
-- **Stale README**: references nonexistent `test_tds_minimal.py`; real path is `/data/storage/notebooks`.
-- **`qdb.get_orderbooks(last_n)`** ignores its argument (hard-coded `LIMIT -10`); docstring is inaccurate.
 - **Backend performance**: each `column_values` call runs `ROW_NUMBER()` over the whole table and fetches the schema twice; slow on large tables.
 - **Leftover config**: app-mode configs (`data/deephaven/app.d/config.app`, `docker/deephaven/config/app.d/cryptofeed.app`, `init_app.py`) have all script entries commented out.

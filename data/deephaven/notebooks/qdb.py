@@ -141,17 +141,16 @@ def get_candles(sample_by="5s", verbose=False):
 def get_orderbooks(last_n=1000, verbose=False):
     """
     Get orderbook snapshots from QuestDB.
-    Uses orderbooks_1s view (1-second sampled data).
-
-    NOTE: This returns only metadata (timestamp, exchange, symbol).
-    For full orderbook data with bids/asks arrays, use get_orderbooks_2d().
+    Uses orderbooks_1s view (1-second sampled data, kept after the raw
+    orderbooks table expires via its 1 hour TTL).
 
     Args:
         last_n: Number of most recent snapshots to fetch
         verbose: Print the query
 
     Returns:
-        Deephaven table with orderbook metadata
+        Deephaven table with timestamp, exchange, symbol and the bid/ask
+        price and size arrays (bid_prices, bid_sizes, ask_prices, ask_sizes)
     """
     query = f"""
     SELECT
@@ -163,7 +162,7 @@ def get_orderbooks(last_n=1000, verbose=False):
     , asks[1] AS ask_prices
     , asks[2] AS ask_sizes
     FROM orderbooks_1s
-    LIMIT -{abs(10)}
+    LIMIT -{abs(int(last_n))}
     """
     if verbose:
         print(query)

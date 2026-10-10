@@ -61,8 +61,14 @@ make test             # Verify health
 From Deephaven UI (http://localhost:10000):
 
 ```python
-# Test QuestDB connection
-exec(open('/data/notebooks/test_tds_minimal.py').read())
+# Static snapshots (ConnectorX)
+exec(open('/data/storage/notebooks/trades_static.py').read())
+
+# Live, ticking tables (TableDataService on QuestDB WAL)
+exec(open('/data/storage/notebooks/trades_live_via_questdb_wal.py').read())
+
+# TradingView charts (candles + volume, tick lines per exchange)
+exec(open('/data/storage/notebooks/trades_chart_live.py').read())
 
 # Query recent trades
 import qdb
