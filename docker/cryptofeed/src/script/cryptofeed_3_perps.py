@@ -230,7 +230,13 @@ def probe(venue):
     """(feed class, listed symbols, error) for a venue; error is None when reachable."""
     import cryptofeed.exchanges as cryptofeed_exchanges  # lazy: keeps this module importable
 
-    feed_class = getattr(cryptofeed_exchanges, venue.feed_class)
+    if venue.feed_factory:
+        import importlib
+
+        module, function = venue.feed_factory.split(":")
+        feed_class = getattr(importlib.import_module(module), function)()
+    else:
+        feed_class = getattr(cryptofeed_exchanges, venue.feed_class)
     try:
         with quiet_loggers("cryptofeed.connection", "cryptofeed.exchange"):
             return feed_class, feed_class.symbols(), None

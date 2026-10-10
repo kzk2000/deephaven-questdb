@@ -146,6 +146,8 @@ class Venue:
     # extra aggregated L2 subscriptions (venue "nSigFigs" values, finest first) that reach far
     # beyond the raw book; see DeepBooks
     deep_sig_figs: tuple = ()
+    # "module:function" returning a feed class to use instead of cryptofeed.exchanges.<feed_class>
+    feed_factory: str = ""
 
     def stored_symbol(self, symbol: str) -> str:
         return self.aliases.get(symbol, symbol)
@@ -191,6 +193,7 @@ VENUES: Dict[str, Venue] = {
             "ETH-USD-PERP",
         ),
         bybit_specs,
+        feed_factory="bybit_ws:bybit_feed_class",  # WebSocket only: REST is blocked (HTTP 403)
     ),
 }
 
