@@ -15,11 +15,9 @@ Welcome to the deephaven-questdb project documentation!
 
 See [history/](history/) for detailed migration and refactoring logs:
 
-### Recent Work (December 2024)
+### Earlier work (December 2024)
 - **[SDK Migration](history/2024-12-sdk-migration/)** - Migrated to official QuestDB Python SDK
 - **[Refactoring](history/2024-12-refactoring/)** - Code organization and cleanup
-
-All changes are production-ready with zero breaking changes.
 
 ## Quick Links
 

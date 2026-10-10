@@ -10,16 +10,18 @@
 - **Perpetuals:** BTC/ETH linear and inverse perps from Deribit, OKX and Hyperliquid stream into `trades` / `orderbooks`, with per-second liquidity metrics in `perps_liquidity` (Binance (USDT-M only) and Bybit are enabled but region-blocked from this host; see CLAUDE.md)
 - **Coinbase:** no-auth override of cryptofeed's Coinbase feed (`docker/cryptofeed/src/coinbase.py`) on the public Exchange websocket; Bitstamp and Kraken use cryptofeed's own feeds
 - **Protocol:** QWP over WebSocket (port 9000), 25 ms client flush interval; ILP/HTTP via `QUESTDB_PROTOCOL=http`
-- **Trades:** Pure SDK implementation via ILP
-- **Orderbooks:** Pure SDK with 2D numpy arrays
+- **Trades:** SDK `row()` per tick; `trades` is deduplicated (`DEDUP UPSERT KEYS(timestamp, exchange, symbol, trade_id)`)
+- **Orderbooks:** SDK with 2D numpy arrays (top 20 levels)
+- **QuestDB tuning:** `QDB_CAIRO_WRITER_DATA_APPEND_PAGE_SIZE=1M` in docker-compose.yml (the 16M default preallocated ~700 MB for a small 42-column table)
 - **Queries:** REST API (port 9000)
 
 ### Schema
-- **Trades Table:** Standard columns (timestamp, exchange, symbol, side, price, size, type)
+- **Trades Table:** timestamp (TIMESTAMP_NS), exchange, symbol, side, price, size (base coin), trade_id, plus size_native, size_unit, contract_size, contract_type (spot / linear / inverse) and notional_usd
 - **Orderbooks Table:** 2D arrays for efficient storage
   - `bids DOUBLE[][]` - Format: `[[prices...], [volumes...]]`
   - `asks DOUBLE[][]` - Format: `[[prices...], [volumes...]]`
-- **Schema Status:** Preserved, zero breaking changes from migration
+- **perps_liquidity:** one row per perp instrument per ~1 s: mid, spread, USD depth within 1..100 bps, slippage for $10k..$5M orders, book reach (`*_reach_bps`)
+- **Materialized views:** `orderbooks_1s` (SAMPLE BY 1s), `perps_liquidity_1m`, `perps_trades_10s`, `spot_trades_10s`
 
 ## Data Flow Status
 
@@ -30,13 +32,20 @@ Run `make test` for live row counts of `trades`, `orderbooks` and `orderbooks_1s
 - `trades`: kept (partitioned by day)
 - `orderbooks`: partitioned by hour, `TTL 1 HOURS`
 - `orderbooks_1s`: materialized view (1-second samples), kept
+- `perps_liquidity`: `TTL 3 DAYS`; `perps_trades_10s`, `spot_trades_10s`: `TTL 2 DAYS`
 
 ### Services
 - ✅ **QuestDB:** Healthy (ports 8812 and 9000 in use; 9009 TCP ILP is exposed but unused)
 - ✅ **Deephaven:** Healthy (port 10000)
-- ✅ **Cryptofeed:** Running (trades + orderbooks processes)
+- ✅ **Cryptofeed:** Running (trades, orderbooks and perps processes, supervised by `cryptofeed_0_startup.sh`)
 
-## Recent Major Changes
+## Deephaven
+
+- **Dashboard:** `notebooks/perps_dashboard.py` (widget `perps_dashboard`), built on `qdb_feed.feed_query` state tables over the views above; helpers and venue registry in `perps_dash_lib.py`
+- **Feeds:** `qdb_feed.py` (`feed_table`, `feed_query`) is the recommended way to get ticking tables; the positional TableDataService backend (`qdb_backend.py`) can glue columns of different rows together when rows arrive out of timestamp order
+- **Static:** `qdb.py` (ConnectorX over the Postgres wire)
+
+## Earlier Changes (December 2024)
 
 ### SDK Migration (December 2024)
 1. **Trades Migration** - Migrated from raw socket ILP to official SDK
@@ -53,22 +62,6 @@ See [history/2024-12-sdk-migration/](history/2024-12-sdk-migration/) for detaile
 3. **Table Rename** - `orderbooks_compact` → `orderbooks`
 
 See [history/2024-12-refactoring/](history/2024-12-refactoring/) for detailed refactoring logs.
-
-## Code Quality
-
-### QuestDBWriter
-- **Lines of code:** 247 (reduced from 292)
-- **Complexity:** Low (single initialization pattern)
-- **Dead code:** 0 lines
-- **Test coverage:** Unit, integration, and simulation tests
-
-### Benefits from Recent Work
-- ✅ Pure SDK implementation (official support)
-- ✅ Simpler, more maintainable code
-- ✅ Better error handling
-- ✅ Future-proof architecture
-- ✅ Zero breaking changes
-- ✅ Schema preserved
 
 ## Known Issues
 

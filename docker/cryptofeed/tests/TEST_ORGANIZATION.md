@@ -54,7 +54,7 @@ docker/cryptofeed/tests/
 - **Speed:** Medium (1-5 seconds per test)
 - **Coverage:**
   - Orderbook writing (REST API)
-  - Trade writing (ILP protocol)
+  - Trade writing (SDK, QWP)
   - SQL query execution
   - Data format verification
   - Depth limiting

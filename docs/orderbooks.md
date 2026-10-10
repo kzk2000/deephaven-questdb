@@ -15,8 +15,11 @@ bids: [[50000.0, 49999.0, 49998.0], [1.5, 2.0, 1.0]]
 asks: [[50001.0, 50002.0, 50003.0], [1.2, 0.8, 2.5]]
 ```
 
-Rows are written by `QuestDBWriter.write_orderbook` (official SDK, ILP over HTTP, numpy arrays,
-top 20 levels by default).
+Rows are written by `QuestDBWriter.write_orderbook` (official SDK, QWP over WebSocket, numpy
+arrays, top 20 levels by default). Spot books are BTC-USD from Coinbase, Bitstamp and Kraken;
+perp books (BTC/ETH, see `perps.py`) have their sizes converted to base coin. The perps liquidity
+metrics (`perps_liquidity`) are computed at ingest from the full in-memory book, not from these
+20 stored levels.
 
 ## Retention
 
@@ -30,7 +33,7 @@ top 20 levels by default).
   raw rows.
 - `init_questdb_tables.py` creates the table with these settings. A table created earlier with a
   different partitioning must be dropped (together with `orderbooks_1s`) and recreated. Stop
-  cryptofeed first, otherwise ILP auto-creates the table with default settings.
+  cryptofeed first, otherwise ingest auto-creates the table with default settings.
 
 ## Using the data
 

@@ -38,7 +38,7 @@ pytest integration/ -v
 
 **Tests:**
 - `test_orderbooks.py` - Orderbook writing and verification
-- `test_trades.py` - Trade writing via ILP
+- `test_trades.py` - Trade writing via the SDK (QWP)
 - `test_queries.py` - SQL query execution via REST
 
 ### 3. Simulation Tests (`simulation/`)
