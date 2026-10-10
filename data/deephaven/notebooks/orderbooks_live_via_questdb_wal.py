@@ -45,9 +45,20 @@ orderbooks = create_live_table(
     history_seconds=HISTORY_SECONDS,
 ).sort_descending(order_by=["timestamp"])
 
-# Add latency calculations
-orderbooks = orderbooks.update_view(
+# bids / asks arrive as double[][] ([[prices], [sizes]]). The grid shows a nested array as
+# "[[D@3343baa0,[D@3e14f421]" (Java's default toString), so split each into two double[]
+# columns, the same shape qdb.get_orderbooks() returns, and add best bid/ask and latency.
+orderbooks = orderbooks.view(
     [
+        "timestamp",
+        "exchange",
+        "symbol",
+        "best_bid = bids[0][0]",
+        "best_ask = asks[0][0]",
+        "bid_prices = bids[0]",
+        "bid_sizes = bids[1]",
+        "ask_prices = asks[0]",
+        "ask_sizes = asks[1]",
         "latency_seconds = diffNanos(timestamp, now()) / 1e9",
     ]
 )
