@@ -11,10 +11,10 @@ authors = [
 # Note: ruff and pytest are run via uvx (no installation needed)
 # Install with: pip install -e ".[cryptofeed]" or pip install -e ".[deephaven]"
 
+# cryptofeed 3.x needs Python >= 3.13 (the cryptofeed image is python:3.13); keep in sync with
+# docker/cryptofeed/requirements.txt
 cryptofeed = [
-    "cryptofeed==2.4.0",
-    "websockets==12.0",
-    "orjson==3.10.6",
+    "cryptofeed==3.0.1",
     "questdb[dataframe]==4.1.0",
 ]
 

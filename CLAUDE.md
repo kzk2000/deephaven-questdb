@@ -20,7 +20,7 @@ Exchanges -> cryptofeed -> ILP/HTTP (questdb:9000) -> QuestDB 10.0.1 (WAL tables
 
 - `Makefile`: build, build_with_drop, up, down, rebuild, restart, clean, ps, logs*, test, urls, format.
 - `pyproject.toml`: optional dep groups `cryptofeed`, `deephaven`. Ruff: line length 100, py310, double quotes. Pytest testpaths: `docker/cryptofeed/tests`.
-- `docker/cryptofeed/Dockerfile`: python:3.12; overwrites cryptofeed's `coinbase.py` with `src/coinbase.py` (uses undocumented Coinbase endpoints to avoid auth).
+- `docker/cryptofeed/Dockerfile`: python:3.13 (cryptofeed 3.x requires it); overwrites cryptofeed's `exchanges/coinbase.py` with `src/coinbase.py`, the no-auth hack: it keeps using the public Coinbase Exchange feed (`wss://ws-feed.exchange.coinbase.com`: `matches`, `level2_batch`, `ticker`) instead of upstream's Advanced Trade client. It is ported to cryptofeed 3.0.1 and the build fails if another version is installed; on a cryptofeed upgrade re-port it (diff against the new upstream `coinbase.py`).
 - `docker/cryptofeed/src/script/cryptofeed_0_startup.sh`: init tables, sleep 2s, launch trades/orderbooks feeds, restart on death.
 - `src/questdb_writer.py`: `QuestDBWriter` (questdb SDK `Sender`, HTTP ILP). `write_trade`, `write_orderbook` (2D numpy), `execute_sql` (REST). `questdb_writer_queued.py` is mostly commented out.
 - `docker/deephaven/Dockerfile`: pip installs connectorx, sqlalchemy, psycopg2, polars and `deephaven-plugin-tradingview-lightweight==0.0.1` (TradingView charts; alpha). The old `TableDataService` callback patch was removed (fixed upstream in 42.6; see `docs/DEEPHAVEN_BUG_REPORT.md`).

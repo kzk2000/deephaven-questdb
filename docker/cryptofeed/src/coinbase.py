@@ -1,58 +1,56 @@
 """
-Copyright (C) 2017-2023 Bryant Moscon - bmoscon@gmail.com
+Coinbase Exchange feed that works WITHOUT authentication (local override).
 
-Please see the LICENSE file for the terms and conditions
-associated with this software.
+This file replaces cryptofeed's own ``cryptofeed/exchanges/coinbase.py`` at image build
+time (see the Dockerfile). It is the "no-auth hack": cryptofeed 3.x talks to the Advanced Trade
+API, while this keeps using the public Coinbase Exchange websocket feed, which needs no
+credentials for the channels we use:
+
+    wss://ws-feed.exchange.coinbase.com
+        matches        -> TRADES
+        level2_batch   -> L2_BOOK   (plain "level2" now requires authentication)
+        ticker         -> TICKER
+
+Differences from upstream cryptofeed (2.4.0 Coinbase, ported to the 3.0 core):
+    - endpoints: ws-feed.exchange.coinbase.com / api.exchange.coinbase.com (the old
+      *.pro.coinbase.com hosts are gone)
+    - L2 subscription uses the public "level2_batch" channel
+    - L2 updates only delete a price level that exists, and ignore zero-size inserts
+    - L3 book (authenticated "full" channel) and the REST snapshot mixin are removed
+
+Targets cryptofeed 3.0.1; the Dockerfile asserts the installed version matches.
+
+Based on cryptofeed, Copyright (C) 2017-2026 Bryant Moscon - bmoscon@gmail.com
+Please see the cryptofeed LICENSE file for the terms and conditions associated with this software.
 """
 
-import asyncio
 import logging
-import time
 from collections import defaultdict
 from decimal import Decimal
 from typing import Dict, Tuple
 
-from cryptofeed.connection import (
-    AsyncConnection,
-    RestEndpoint,
-    Routes,
-    WebsocketEndpoint,
-)
-from cryptofeed.defines import (
-    ASK,
-    BID,
-    BUY,
-    COINBASE,
-    L2_BOOK,
-    L3_BOOK,
-    SELL,
-    TICKER,
-    TRADES,
-)
-from cryptofeed.exchanges.mixins.coinbase_rest import CoinbaseRestMixin
+from cryptofeed import _json as json
+from cryptofeed.connection import AsyncConnection, RestEndpoint, Routes, WebsocketEndpoint
+from cryptofeed.defines import ASK, BID, BUY, COINBASE, L2_BOOK, SELL, TICKER, TRADES
 from cryptofeed.feed import Feed
 from cryptofeed.symbols import Symbol
 from cryptofeed.types import OrderBook, Ticker, Trade
-from yapic import json
 
-LOG = logging.getLogger("feedhandler")
+LOG = logging.getLogger(__name__)
+
+# cryptofeed standard channel -> Coinbase Exchange channel actually subscribed to
+LEVEL2_PUBLIC_CHANNEL = "level2_batch"
 
 
-class Coinbase(Feed, CoinbaseRestMixin):
+class Coinbase(Feed):
     id = COINBASE
     websocket_endpoints = [
         WebsocketEndpoint("wss://ws-feed.exchange.coinbase.com", options={"compression": None})
     ]
-    rest_endpoints = [
-        RestEndpoint(
-            "https://api.exchange.coinbase.com",
-            routes=Routes("/products", l3book="/products/{}/book?level=3"),
-        )
-    ]
+    rest_endpoints = [RestEndpoint("https://api.exchange.coinbase.com", routes=Routes("/products"))]
 
     websocket_channels = {
         L2_BOOK: "level2",
-        L3_BOOK: "full",
         TRADES: "matches",
         TICKER: "ticker",
     }
@@ -73,52 +71,18 @@ class Coinbase(Feed, CoinbaseRestMixin):
 
     def __init__(self, callbacks=None, **kwargs):
         super().__init__(callbacks=callbacks, **kwargs)
-        # we only keep track of the L3 order book if we have at least one subscribed order-book callback.
-        # use case: subscribing to the L3 book plus Trade type gives you order_type information (see _received below),
-        # and we don't need to do the rest of the book-keeping unless we have an active callback
-        self.keep_l3_book = False
-        if callbacks and L3_BOOK in callbacks:
-            self.keep_l3_book = True
         self.__reset()
 
     def __reset(self):
-        self.order_map = {}
-        self.order_type_map = {}
-        self.seq_no = None
-        # sequence number validation only works when the FULL data stream is enabled
-        chan = self.std_channel_to_exchange(L3_BOOK)
-        if chan in self.subscription:
-            pairs = self.subscription[chan]
-            self.seq_no = {pair: None for pair in pairs}
-        self._l3_book = {}
         self._l2_book = {}
 
     async def _ticker(self, msg: dict, timestamp: float):
         """
         {
             'type': 'ticker',
-            'sequence': 5928281084,
-            'product_id': 'BTC-USD',
-            'price': '8500.01000000',
-            'open_24h': '8217.24000000',
-            'volume_24h': '4529.1293778',
-            'low_24h': '8172.00000000',
-            'high_24h': '8600.00000000',
-            'volume_30d': '329178.93594133',
-            'best_bid': '8500',
-            'best_ask': '8500.01'
-        }
-
-        {
-            'type': 'ticker',
             'sequence': 5928281348,
             'product_id': 'BTC-USD',
             'price': '8500.00000000',
-            'open_24h': '8217.24000000',
-            'volume_24h': '4529.13179472',
-            'low_24h': '8172.00000000',
-            'high_24h': '8600.00000000',
-            'volume_30d': '329178.93835825',
             'best_bid': '8500',
             'best_ask': '8500.01',
             'side': 'sell',
@@ -127,7 +91,6 @@ class Coinbase(Feed, CoinbaseRestMixin):
             'last_size': '0.00241692'
         }
         """
-
         ts = self.timestamp_normalize(msg["time"]) if "time" in msg else None
         await self.callback(
             TICKER,
@@ -142,11 +105,11 @@ class Coinbase(Feed, CoinbaseRestMixin):
             timestamp,
         )
 
-    async def _book_update(self, msg: dict, timestamp: float):
+    async def _trade(self, msg: dict, timestamp: float):
         """
         {
-            'type': 'match', or last_match
-            'trade_id': 43736593
+            'type': 'match',  # or 'last_match'
+            'trade_id': 43736593,
             'maker_order_id': '2663b65f-b74e-4513-909d-975e3910cf22',
             'taker_order_id': 'd058d737-87f1-4763-bbb4-c2ccf2a40bde',
             'side': 'buy',
@@ -156,51 +119,18 @@ class Coinbase(Feed, CoinbaseRestMixin):
             'sequence': 5928276661,
             'time': '2018-05-21T00:26:05.585000Z'
         }
+
+        'side' is the maker side of the trade but we report the taker side
         """
-        pair = self.exchange_symbol_to_std_symbol(msg["product_id"])
-        ts = self.timestamp_normalize(msg["time"])
-
-        if self.keep_l3_book and "full" in self.subscription and pair in self.subscription["full"]:
-            delta = {BID: [], ASK: []}
-            price = Decimal(msg["price"])
-            side = ASK if msg["side"] == "sell" else BID
-            size = Decimal(msg["size"])
-            maker_order_id = msg["maker_order_id"]
-
-            _, new_size = self.order_map[maker_order_id]
-            new_size -= size
-            if new_size <= 0:
-                del self.order_map[maker_order_id]
-                self.order_type_map.pop(maker_order_id, None)
-                delta[side].append((maker_order_id, price, 0))
-                del self._l3_book[pair].book[side][price][maker_order_id]
-                if len(self._l3_book[pair].book[side][price]) == 0:
-                    del self._l3_book[pair].book[side][price]
-            else:
-                self.order_map[maker_order_id] = (price, new_size)
-                self._l3_book[pair].book[side][price][maker_order_id] = new_size
-                delta[side].append((maker_order_id, price, new_size))
-
-            await self.book_callback(
-                L3_BOOK,
-                self._l3_book[pair],
-                timestamp,
-                timestamp=ts,
-                delta=delta,
-                raw=msg,
-                sequence_number=self.seq_no[pair],
-            )
-
-        order_type = self.order_type_map.get(msg["taker_order_id"])
         t = Trade(
             self.id,
             self.exchange_symbol_to_std_symbol(msg["product_id"]),
             SELL if msg["side"] == "buy" else BUY,
             Decimal(msg["size"]),
             Decimal(msg["price"]),
-            ts,
+            self.timestamp_normalize(msg["time"]),
             id=str(msg["trade_id"]),
-            type=order_type,
+            type=None,
             raw=msg,
         )
         await self.callback(TRADES, t, timestamp)
@@ -221,6 +151,9 @@ class Coinbase(Feed, CoinbaseRestMixin):
 
     async def _pair_level2_update(self, msg: dict, timestamp: float):
         pair = self.exchange_symbol_to_std_symbol(msg["product_id"])
+        if pair not in self._l2_book:
+            return  # update before the snapshot; the snapshot replaces all state anyway
+
         ts = self.timestamp_normalize(msg["time"])
         delta = {BID: [], ASK: []}
         for side, price, amount in msg["changes"]:
@@ -228,10 +161,11 @@ class Coinbase(Feed, CoinbaseRestMixin):
             price = Decimal(price)
             amount = Decimal(amount)
 
-            if (amount == 0) and (price in self._l2_book[pair].book[side]):
-                del self._l2_book[pair].book[side][price]
-                delta[side].append((price, 0))
-            elif amount > 0:
+            if amount == 0:
+                if price in self._l2_book[pair].book[side]:
+                    del self._l2_book[pair].book[side][price]
+                    delta[side].append((price, 0))
+            else:
                 self._l2_book[pair].book[side][price] = amount
                 delta[side].append((price, amount))
 
@@ -239,217 +173,24 @@ class Coinbase(Feed, CoinbaseRestMixin):
             L2_BOOK, self._l2_book[pair], timestamp, timestamp=ts, raw=msg, delta=delta
         )
 
-    async def _book_snapshot(self, pairs: list):
-        # Coinbase needs some time to send messages to us
-        # before we request the snapshot. If we don't sleep
-        # the snapshot seq no could be much earlier than
-        # the subsequent messages, causing a seq no mismatch.
-        await asyncio.sleep(2)
-
-        urls = [self.rest_endpoints[0].route("l3book", self.sandbox).format(pair) for pair in pairs]
-
-        results = []
-        for url in urls:
-            ret = await self.http_conn.read(url)
-            results.append(ret)
-            # rate limit - 3 per second
-            await asyncio.sleep(0.3)
-
-        timestamp = time.time()
-        for res, pair in zip(results, pairs):
-            orders = json.loads(res, parse_float=Decimal)
-            npair = self.exchange_symbol_to_std_symbol(pair)
-            self._l3_book[npair] = OrderBook(self.id, pair, max_depth=self.max_depth)
-            self.seq_no[npair] = orders["sequence"]
-            for side in (BID, ASK):
-                for price, size, order_id in orders[side + "s"]:
-                    price = Decimal(price)
-                    size = Decimal(size)
-                    if price in self._l3_book[npair].book[side]:
-                        self._l3_book[npair].book[side][price][order_id] = size
-                    else:
-                        self._l3_book[npair].book[side][price] = {order_id: size}
-                    self.order_map[order_id] = (price, size)
-            await self.book_callback(L3_BOOK, self._l3_book[npair], timestamp, raw=orders)
-
-    async def _open(self, msg: dict, timestamp: float):
-        if not self.keep_l3_book:
-            return
-        delta = {BID: [], ASK: []}
-        price = Decimal(msg["price"])
-        side = ASK if msg["side"] == "sell" else BID
-        size = Decimal(msg["remaining_size"])
-        pair = self.exchange_symbol_to_std_symbol(msg["product_id"])
-        order_id = msg["order_id"]
-        ts = self.timestamp_normalize(msg["time"])
-
-        if price in self._l3_book[pair].book[side]:
-            self._l3_book[pair].book[side][price][order_id] = size
-        else:
-            self._l3_book[pair].book[side][price] = {order_id: size}
-        self.order_map[order_id] = (price, size)
-
-        delta[side].append((order_id, price, size))
-
-        await self.book_callback(
-            L3_BOOK,
-            self._l3_book[pair],
-            timestamp,
-            timestamp=ts,
-            delta=delta,
-            raw=msg,
-            sequence_number=msg["sequence"],
-        )
-
-    async def _done(self, msg: dict, timestamp: float):
-        """
-        per Coinbase API Docs:
-
-        A done message will be sent for received orders which are fully filled or canceled due
-        to self-trade prevention. There will be no open message for such orders. Done messages
-        for orders which are not on the book should be ignored when maintaining a real-time order book.
-        """
-        if "price" not in msg:
-            # market order life cycle: received -> done
-            self.order_type_map.pop(msg["order_id"], None)
-            self.order_map.pop(msg["order_id"], None)
-            return
-
-        order_id = msg["order_id"]
-        self.order_type_map.pop(order_id, None)
-        if order_id not in self.order_map:
-            return
-
-        del self.order_map[order_id]
-        if self.keep_l3_book:
-            delta = {BID: [], ASK: []}
-
-            price = Decimal(msg["price"])
-            side = ASK if msg["side"] == "sell" else BID
-            pair = self.exchange_symbol_to_std_symbol(msg["product_id"])
-            ts = self.timestamp_normalize(msg["time"])
-
-            del self._l3_book[pair].book[side][price][order_id]
-            if len(self._l3_book[pair].book[side][price]) == 0:
-                del self._l3_book[pair].book[side][price]
-            delta[side].append((order_id, price, 0))
-
-            await self.book_callback(
-                L3_BOOK,
-                self._l3_book[pair],
-                timestamp,
-                delta=delta,
-                timestamp=ts,
-                raw=msg,
-                sequence_number=msg["sequence"],
-            )
-
-    async def _received(self, msg: dict, timestamp: float):
-        """
-        per Coinbase docs:
-        A valid order has been received and is now active. This message is emitted for every single
-        valid order as soon as the matching engine receives it whether it fills immediately or not.
-
-        This message is the only time we receive the order type (limit vs market) for a given order,
-        so we keep it in a map by order ID.
-        """
-        order_id = msg["order_id"]
-        order_type = msg["order_type"]
-        self.order_type_map[order_id] = order_type
-
-    async def _change(self, msg: dict, timestamp: float):
-        """
-        Like done, these updates can be sent for orders that are not in the book. Per the docs:
-
-        Not all done or change messages will result in changing the order book. These messages will
-        be sent for received orders which are not yet on the order book. Do not alter
-        the order book for such messages, otherwise your order book will be incorrect.
-
-        {'price': '16556.88', 'old_size': '0.24076471', 'new_size': '0.04076471', 'order_id': '9675d63e-0432-413d-a3f3-f30d7df39614', 'reason': 'STP', 'type': 'change', 'side': 'buy', 'product_id': 'BTC-USD', 'time': datetime.datetime(2022, 11, 24, 0, 35, 28, 904847, tzinfo=datetime.timezone.utc), 'sequence': 50703787284}
-        """
-        if not self.keep_l3_book:
-            return
-
-        delta = {BID: [], ASK: []}
-
-        if "price" not in msg or not msg["price"]:
-            return
-
-        order_id = msg["order_id"]
-        if order_id not in self.order_map:
-            return
-
-        ts = self.timestamp_normalize(msg["time"])
-        price = Decimal(msg["price"])
-        side = ASK if msg["side"] == "sell" else BID
-        new_size = Decimal(msg["new_size"])
-        pair = self.exchange_symbol_to_std_symbol(msg["product_id"])
-
-        self._l3_book[pair].book[side][price][order_id] = new_size
-        self.order_map[order_id] = (price, new_size)
-
-        delta[side].append((order_id, price, new_size))
-
-        await self.book_callback(
-            L3_BOOK,
-            self._l3_book[pair],
-            timestamp,
-            delta=delta,
-            timestamp=ts,
-            raw=msg,
-            sequence_number=msg["sequence"],
-        )
-
     async def message_handler(self, msg: str, conn: AsyncConnection, timestamp: float):
-        # PERF perf_start(self.id, 'msg')
         msg = json.loads(msg, parse_float=Decimal)
-        if self.seq_no:
-            if "product_id" in msg and "sequence" in msg:
-                pair = self.exchange_symbol_to_std_symbol(msg["product_id"])
-                if not self.seq_no.get(pair, None):
-                    return
-                if msg["sequence"] <= self.seq_no[pair]:
-                    return
-                if msg["sequence"] != self.seq_no[pair] + 1:
-                    LOG.warning(
-                        "%s: Missing sequence number detected for %s. Received %d, expected %d",
-                        self.id,
-                        pair,
-                        msg["sequence"],
-                        self.seq_no[pair] + 1,
-                    )
-                    LOG.warning("%s: Resetting data for %s", self.id, pair)
-                    self.__reset(symbol=pair)
-                    await self._book_snapshot([pair])
-                    return
 
-                self.seq_no[pair] = msg["sequence"]
-
-        if "type" in msg:
-            if msg["type"] == "ticker":
-                await self._ticker(msg, timestamp)
-            elif msg["type"] == "match" or msg["type"] == "last_match":
-                await self._book_update(msg, timestamp)
-            elif msg["type"] == "snapshot":
-                await self._pair_level2_snapshot(msg, timestamp)
-            elif msg["type"] == "l2update":
-                await self._pair_level2_update(msg, timestamp)
-            elif msg["type"] == "open":
-                await self._open(msg, timestamp)
-            elif msg["type"] == "done":
-                await self._done(msg, timestamp)
-            elif msg["type"] == "change":
-                await self._change(msg, timestamp)
-            elif msg["type"] == "received":
-                await self._received(msg, timestamp)
-            elif msg["type"] == "activate":
-                pass
-            elif msg["type"] == "subscriptions":
-                pass
-            else:
-                LOG.warning("%s: Invalid message type %s", self.id, msg)
-            # PERF perf_end(self.id, 'msg')
-            # PERF perf_log(self.id, 'msg')
+        msg_type = msg.get("type")
+        if msg_type == "ticker":
+            await self._ticker(msg, timestamp)
+        elif msg_type in ("match", "last_match"):
+            await self._trade(msg, timestamp)
+        elif msg_type == "snapshot":
+            await self._pair_level2_snapshot(msg, timestamp)
+        elif msg_type == "l2update":
+            await self._pair_level2_update(msg, timestamp)
+        elif msg_type in ("subscriptions", "heartbeat", "activate"):
+            pass
+        elif msg_type == "error":
+            LOG.error("%s: %s", self.id, msg)
+        elif msg_type is not None:
+            LOG.warning("%s: Invalid message type %s", self.id, msg)
 
     async def subscribe(self, conn: AsyncConnection):
         self.__reset()
@@ -460,11 +201,7 @@ class Coinbase(Feed, CoinbaseRestMixin):
                     {
                         "type": "subscribe",
                         "product_ids": self.subscription[chan],
-                        "channels": [chan if chan != "level2" else "level2_batch"],
+                        "channels": [LEVEL2_PUBLIC_CHANNEL if chan == "level2" else chan],
                     }
                 )
             )
-
-        chan = self.std_channel_to_exchange(L3_BOOK)
-        if chan in self.subscription:
-            await self._book_snapshot(self.subscription[chan])
