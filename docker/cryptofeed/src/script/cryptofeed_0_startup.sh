@@ -18,11 +18,16 @@ echo "Starting orderbooks feed..."
 python /cryptofeed/src/script/cryptofeed_2_orderbooks.py &
 ORDERBOOKS_PID=$!
 
+# Start the perpetual futures process (Binance / Bybit / Deribit / OKX, BTC and ETH)
+echo "Starting perpetuals feed..."
+python /cryptofeed/src/script/cryptofeed_3_perps.py &
+PERPS_PID=$!
+
 # Function to cleanup background processes
 cleanup() {
     echo "Stopping processes..."
-    kill $TRADES_PID $ORDERBOOKS_PID 2>/dev/null
-    wait $TRADES_PID $ORDERBOOKS_PID 2>/dev/null
+    kill $TRADES_PID $ORDERBOOKS_PID $PERPS_PID 2>/dev/null
+    wait $TRADES_PID $ORDERBOOKS_PID $PERPS_PID 2>/dev/null
     echo "All processes stopped."
 }
 
@@ -43,5 +48,11 @@ while true; do
         ORDERBOOKS_PID=$!
     fi
     
+    if ! kill -0 $PERPS_PID 2>/dev/null; then
+        echo "Perpetuals process exited, restarting..."
+        python /cryptofeed/src/script/cryptofeed_3_perps.py &
+        PERPS_PID=$!
+    fi
+
     sleep 5
 done

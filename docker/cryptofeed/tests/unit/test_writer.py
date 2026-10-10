@@ -148,6 +148,47 @@ def test_trade_id_is_passed_through_as_a_string(mock_connect):
     writer.close()
 
 
+def _last_row(mock_connect):
+    return mock_connect.return_value.sender.return_value.row.call_args.kwargs
+
+
+def test_spot_trades_get_identity_contract_columns(mock_connect):
+    writer = QuestDBWriter(host="questdb", verbose=False)
+    writer.write_trade(_trade(id="1", price=82000.0, amount=0.5))
+    row = _last_row(mock_connect)
+    assert row["columns"]["size"] == 0.5
+    assert row["columns"]["size_native"] == 0.5
+    assert row["columns"]["contract_size"] == 1.0
+    assert row["columns"]["notional_usd"] == 41000.0
+    assert row["symbols"]["size_unit"] == "BASE"
+    assert row["symbols"]["contract_type"] == "spot"
+    writer.close()
+
+
+def test_derivative_columns_are_passed_through(mock_connect):
+    writer = QuestDBWriter(host="questdb", verbose=False)
+    writer.write_trade(
+        _trade(
+            id="2",
+            price=83037.6,
+            amount=0.1305,
+            size_native=108.4,
+            size_unit="CONTRACTS",
+            contract_size=100.0,
+            contract_type="inverse",
+            notional_usd=10840.0,
+        )
+    )
+    row = _last_row(mock_connect)
+    assert row["columns"]["size"] == 0.1305
+    assert row["columns"]["size_native"] == 108.4
+    assert row["columns"]["contract_size"] == 100.0
+    assert row["columns"]["notional_usd"] == 10840.0
+    assert row["symbols"]["size_unit"] == "CONTRACTS"
+    assert row["symbols"]["contract_type"] == "inverse"
+    writer.close()
+
+
 def test_missing_trade_id_gets_a_unique_synthetic_id(mock_connect):
     """trades is deduplicated on trade_id; a NULL id would merge distinct trades."""
     writer = QuestDBWriter(host="questdb", verbose=False)

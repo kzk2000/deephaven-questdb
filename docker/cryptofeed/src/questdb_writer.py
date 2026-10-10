@@ -171,19 +171,33 @@ class QuestDBWriter:
             else:
                 ts_nanos = TimestampNanos(int(receipt_timestamp * 1_000_000_000))
 
+            symbols = {
+                "exchange": exchange,
+                "symbol": symbol,
+                "side": side,
+            }
+            columns = {
+                "price": price,
+                "size": size,
+                "trade_id": trade_id,
+            }
+            # Contract columns. Derivative feeds pass their own (see perps.py: `size` is already
+            # base coin and size_native / contract_size / notional_usd describe the venue's
+            # number). Spot rows get the identity values so notional and volume queries work
+            # across every row without special cases.
+            size_native = data.get("size_native")
+            columns["size_native"] = float(size if size_native is None else size_native)
+            columns["contract_size"] = float(data.get("contract_size") or 1.0)
+            notional = data.get("notional_usd")
+            columns["notional_usd"] = float(price * size if notional is None else notional)
+            symbols["size_unit"] = data.get("size_unit") or "BASE"
+            symbols["contract_type"] = data.get("contract_type") or "spot"
+
             # Send via SDK (sender always exists from __init__)
             self._sender.row(
                 self.trades_table,
-                symbols={
-                    "exchange": exchange,
-                    "symbol": symbol,
-                    "side": side,
-                },
-                columns={
-                    "price": price,
-                    "size": size,
-                    "trade_id": trade_id,
-                },
+                symbols=symbols,
+                columns=columns,
                 at=ts_nanos,
             )
 
@@ -194,7 +208,7 @@ class QuestDBWriter:
     # Orderbook Method (using SDK with 2D numpy arrays)
     # =========================================================================
 
-    def write_orderbook(self, book, receipt_timestamp, depth=20):
+    def write_orderbook(self, book, receipt_timestamp, depth=20, size_fn=None):
         """
         Write orderbook snapshot to QuestDB using SDK with 2D numpy arrays
 
@@ -209,6 +223,8 @@ class QuestDBWriter:
             book: Order book object from cryptofeed with book.book.bids and book.book.asks
             receipt_timestamp: Receipt timestamp in seconds (float)
             depth: Number of price levels to capture (default 20)
+            size_fn: optional callable(prices, sizes) -> sizes applied to both sides, used to
+                convert contract / USD sizes to base coin (see perps.SizeSpec.to_base_array)
 
         Returns:
             bool: True if successful, False otherwise
@@ -264,6 +280,9 @@ class QuestDBWriter:
 
             # Create 2D numpy arrays: [[prices...], [volumes...]]
             # SDK v3.0.0+ supports n-dimensional arrays which creates DOUBLE[][] columns in QuestDB
+            if size_fn is not None:
+                bid_volumes = size_fn(np.array(bid_prices), np.array(bid_volumes))
+                ask_volumes = size_fn(np.array(ask_prices), np.array(ask_volumes))
             bids_2d = np.array([bid_prices, bid_volumes], dtype=np.float64)
             asks_2d = np.array([ask_prices, ask_volumes], dtype=np.float64)
 

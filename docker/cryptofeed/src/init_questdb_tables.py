@@ -13,6 +13,17 @@ import time
 TRADES_DEDUP_KEYS = ("timestamp", "exchange", "symbol", "trade_id")
 TRADES_DEDUP_SQL = f"ALTER TABLE trades DEDUP ENABLE UPSERT KEYS({', '.join(TRADES_DEDUP_KEYS)})"
 
+# Columns that make spot and derivatives comparable. `size` is always base coin; these keep what
+# the venue sent and how to convert it (see perps.py). Spot rows: contract_size 1, size_unit BASE,
+# contract_type spot, notional_usd = price x size.
+TRADES_EXTRA_COLUMNS = (
+    ("size_native", "DOUBLE"),
+    ("size_unit", "SYMBOL CAPACITY 16 CACHE"),
+    ("contract_size", "DOUBLE"),
+    ("contract_type", "SYMBOL CAPACITY 16 CACHE"),
+    ("notional_usd", "DOUBLE"),
+)
+
 
 def execute_sql(host, port, sql):
     """Execute SQL via QuestDB HTTP REST API"""
@@ -79,7 +90,12 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
             price DOUBLE,
             size DOUBLE,
             side SYMBOL CAPACITY 256 CACHE,
-            trade_id VARCHAR
+            trade_id VARCHAR,
+            size_native DOUBLE,
+            size_unit SYMBOL CAPACITY 16 CACHE,
+            contract_size DOUBLE,
+            contract_type SYMBOL CAPACITY 16 CACHE,
+            notional_usd DOUBLE
         ) TIMESTAMP(timestamp) PARTITION BY DAY WAL
     """
     result = execute_sql(host, http_port, trades_sql)
@@ -114,6 +130,13 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
                     f"    ⚠️  WARNING: trades.timestamp has type {actual_type}, expected TIMESTAMP_NS"
                 )
                 print("       This may cause precision issues. Consider dropping and recreating.")
+
+    # Contract / notional columns (idempotent; upgrades tables created before they existed)
+    for column, column_type in TRADES_EXTRA_COLUMNS:
+        sql = f"ALTER TABLE trades ADD COLUMN IF NOT EXISTS {column} {column_type}"
+        result = execute_sql(host, http_port, sql)
+        if not (result and result.get("ddl") == "OK"):
+            print(f"    ⚠️  {sql}: {result}")
 
     # Enable deduplication (idempotent: also applies to tables created before this was added;
     # rows already stored are not rewritten)

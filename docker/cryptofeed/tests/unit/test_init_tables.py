@@ -22,3 +22,14 @@ def test_dedup_sql_is_built_from_the_keys():
     assert init.TRADES_DEDUP_SQL == (
         "ALTER TABLE trades DEDUP ENABLE UPSERT KEYS(timestamp, exchange, symbol, trade_id)"
     )
+
+
+def test_trades_has_contract_and_notional_columns():
+    names = [name for name, _ in init.TRADES_EXTRA_COLUMNS]
+    assert names == ["size_native", "size_unit", "contract_size", "contract_type", "notional_usd"]
+
+
+def test_script_still_exposes_its_entry_points():
+    # guards against an edit that drops a helper the constants-only tests would never touch
+    assert callable(init.execute_sql)
+    assert callable(init.init_tables)

@@ -59,5 +59,22 @@ def test_query_with_aggregation(writer):
     assert "dataset" in result
 
 
+def test_init_script_is_idempotent_and_leaves_contract_columns(writer):
+    """Start-up runs this on every container start; it must be safe to run again."""
+    import init_questdb_tables as init
+
+    init.init_tables(host="localhost", wait_for_db=False)
+    columns = {
+        row[0]: row[1]
+        for row in writer.execute_sql("SELECT \"column\", type FROM table_columns('trades')")[
+            "dataset"
+        ]
+    }
+    for name, _ in init.TRADES_EXTRA_COLUMNS:
+        assert name in columns, f"trades.{name} missing"
+    assert columns["contract_size"] == "DOUBLE"
+    assert columns["contract_type"] == "SYMBOL"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
