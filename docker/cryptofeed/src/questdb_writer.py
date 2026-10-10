@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 import numpy as np
-from questdb.ingress import Sender, TimestampNanos
+from questdb import Sender, TimestampNanos
 
 
 class QuestDBWriter:

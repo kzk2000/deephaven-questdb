@@ -15,7 +15,7 @@ authors = [
 # docker/cryptofeed/requirements.txt
 cryptofeed = [
     "cryptofeed==3.0.1",
-    "questdb[dataframe]==4.1.0",
+    "questdb[dataframe]==5.0.0",
 ]
 
 deephaven = [

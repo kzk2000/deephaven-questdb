@@ -6,7 +6,7 @@
 
 ### Data Ingestion
 - **Stack:** QuestDB 10.0.1, Deephaven server-ui 42.6 (Python 3.12), cryptofeed 3.0.1 (Python 3.13)
-- **SDK Version:** questdb[dataframe]==4.1.0 (official QuestDB Python client)
+- **SDK Version:** questdb[dataframe]==5.0.0 (official QuestDB Python client)
 - **Coinbase:** no-auth override of cryptofeed's Coinbase feed (`docker/cryptofeed/src/coinbase.py`) on the public Exchange websocket; Bitstamp and Kraken use cryptofeed's own feeds
 - **Protocol:** ILP over HTTP (port 9000)
 - **Trades:** Pure SDK implementation via ILP

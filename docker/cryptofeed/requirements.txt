@@ -1,3 +1,3 @@
 # websockets, msgspec, aiohttp, uvloop, order_book etc. are pulled in by cryptofeed 3.x
 cryptofeed==3.0.1
-questdb[dataframe]==4.1.0
+questdb[dataframe]==5.0.0
