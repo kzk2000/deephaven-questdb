@@ -1,19 +1,14 @@
 """
 Append-only ticking Deephaven tables fed from QuestDB.
 
-Why not the TableDataService live table (qdb_backend)? It addresses rows by position and
-fetches columns lazily. QuestDB orders rows by their (exchange) timestamp, so a row that
-arrives slightly late is inserted *before* rows already served and every later position
-shifts. Columns that Deephaven fetches at different moments then no longer line up and a row
-ends up with its price from one trade and its symbol from another (measured: 0.9 % of live
-rows). That is inherent to positional paging, not something more caching can fix.
-
-This module sidesteps it: a background thread polls QuestDB for rows at or after a rolling
-watermark, de-duplicates them, and publishes each new row exactly once through a Deephaven
-table publisher. Rows are owned by the engine and never move, so every row is internally
-consistent. A row that shows up late (still within `overlap_seconds` of the watermark) is
-simply appended when it is first seen; use the timestamp column, not row position, for
-ordering.
+How it differs from the TableDataService live table (qdb_backend): that one addresses rows by
+position, so it can only show a settled prefix of the table (rows a few seconds old, see
+qdb_prefix) to keep positions from moving. This module needs no positions: a background thread
+polls QuestDB for rows at or after a rolling watermark, de-duplicates them, and publishes each
+new row exactly once through a Deephaven table publisher. Rows are owned by the engine and never
+move, so rows appear within a poll (0.25 s) of becoming visible. A row that shows up late
+(still within `overlap_seconds` of the watermark) is simply appended when it is first seen;
+use the timestamp column, not row position, for ordering.
 
     from qdb_feed import feed_table
     trades = feed_table("trades", history_seconds=900)                       # ring of 100k rows

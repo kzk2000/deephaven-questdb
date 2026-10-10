@@ -80,7 +80,8 @@ exec(open('/data/storage/notebooks/perps_dashboard.py').read())
 # Static snapshots (QWP, Arrow)
 exec(open('/data/storage/notebooks/trades_static.py').read())
 
-# Live, ticking tables (TableDataService on QuestDB WAL)
+# Live, ticking tables: TableDataService paging QuestDB storage. Exact rows (positions never
+# move), shown once settled: ~4 s after their timestamp (settle_seconds=3 by default)
 exec(open('/data/storage/notebooks/trades_live_via_questdb_wal.py').read())
 
 # TradingView charts (candles + volume, tick lines per exchange)
@@ -93,7 +94,7 @@ trades = qdb.get_trades(last_nticks=1000)
 # Aggregate to candles
 candles = qdb.get_candles(sample_by='1m')
 
-# Consistent ticking tables for dashboards: poll QuestDB, publish each row once
+# Ticking tables for dashboards and views: poll QuestDB, publish each row once (~0.25 s)
 from qdb_feed import feed_table
 live_trades = feed_table("trades", history_seconds=900)
 ```
