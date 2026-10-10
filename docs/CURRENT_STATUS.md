@@ -42,7 +42,7 @@ Run `make test` for live row counts of `trades`, `orderbooks` and `orderbooks_1s
 ## Deephaven
 
 - **Dashboard:** `notebooks/perps_dashboard.py` (widget `perps_dashboard`), built on `qdb_feed.feed_query` state tables over the views above; helpers and venue registry in `perps_dash_lib.py`
-- **Live tables:** `qdb_backend.py` (TableDataService over QuestDB storage) pages a settled prefix (`qdb_prefix.py`): rows are exact and positions never move, at the cost of `settle_seconds` (default 3 s) latency; a row later than that is counted (`late_rows`) and left out
+- **Live tables:** `qdb_backend.py` (TableDataService over QuestDB storage) pages a settled prefix (`qdb_prefix.py`): rows are exact and positions never move, at the cost of `settle_seconds` (default 0.3 s; `timestamp` is the receipt time, newest row ~0.6 s old); a row later than that is counted (`late_rows`) and left out
 - **Feeds:** `qdb_feed.py` (`feed_table`, `feed_query`) polls and publishes rows once (~0.25 s latency); `feed_query` is how the dashboard reads materialized views
 - **Static:** `qdb.py` (QWP, Arrow; ConnectorX over the Postgres wire as `transport="pg"`)
 

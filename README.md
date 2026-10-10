@@ -81,7 +81,7 @@ exec(open('/data/storage/notebooks/perps_dashboard.py').read())
 exec(open('/data/storage/notebooks/trades_static.py').read())
 
 # Live, ticking tables: TableDataService paging QuestDB storage. Exact rows (positions never
-# move), shown once settled: ~4 s after their timestamp (settle_seconds=3 by default)
+# move), sub-second: shown ~0.6 s after receipt (settle_seconds=0.3 by default)
 exec(open('/data/storage/notebooks/trades_live_via_questdb_wal.py').read())
 
 # TradingView charts (candles + volume, tick lines per exchange)
