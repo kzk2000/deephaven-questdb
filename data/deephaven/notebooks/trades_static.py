@@ -5,7 +5,7 @@ This notebook reads trade data from QuestDB and creates Deephaven tables
 for analysis and visualization.
 
 Tables created:
-- trades: All recent trades
+- trades_static: All recent trades (static snapshot; the live table is 'trades')
 - trades_btc: Bitcoin trades only
 - trades_summary: Trade count by exchange and symbol
 - candles_1m: 1-minute OHLCV candles
@@ -19,15 +19,15 @@ import importlib
 importlib.reload(qdb)
 
 
-trades = qdb.get_trades(last_nticks=10)
+trades_static = qdb.get_trades(last_nticks=10)
 
 # Create filtered tables
-trades_btc = trades.where("symbol == `BTC-USD`")
-trades_eth = trades.where("symbol == `ETH-USD`")
+trades_btc = trades_static.where("symbol == `BTC-USD`")
+trades_eth = trades_static.where("symbol == `ETH-USD`")
 
 
 # Create summary tables
-trades_summary = trades.agg_by(
+trades_summary = trades_static.agg_by(
     [
         agg.count_("TradeCount"),
         agg.avg("AvgPrice = price"),

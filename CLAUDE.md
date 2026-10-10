@@ -26,7 +26,7 @@ Exchanges -> cryptofeed -> ILP/HTTP (questdb:9000) -> QuestDB 10.0.1 (WAL tables
 - `docker/deephaven/Dockerfile`: pip installs connectorx, sqlalchemy, psycopg2, polars and `deephaven-plugin-tradingview-lightweight==0.0.1` (TradingView charts; alpha). The old `TableDataService` callback patch was removed (fixed upstream in 42.6; see `docs/DEEPHAVEN_BUG_REPORT.md`).
 - `data/deephaven/notebooks/qdb.py`: static access via ConnectorX (`redshift://...:8812`). `run_query`, `to_table()` (timestamp[us] -> timestamp[ns, tz=UTC], large_list -> list), `get_trades`, `get_candles`, `get_orderbooks`, `get_engine()` (SQLAlchemy, for live).
 - `notebooks/qdb_backend.py`: `QuestDBBackend(TableDataServiceBackend)`. One backend per table in a module-global registry (re-runnable notebooks). Polls `wal_transactions()` every 50ms, falls back to `count(*)`; pages with `ROW_NUMBER() OVER (ORDER BY timestamp)`. API: `create_live_table`, `set_verbose`, `stop_monitoring`.
-- Notebooks: static `trades_static.py`, `orderbooks_static.py`; live `trades_live_via_questdb_wal.py`, `orderbooks_live_via_questdb_wal.py` (add `latency_seconds`); charts `trades_chart_live.py` (TradingView candles + volume, tick lines; `tvl` plugin 0.0.1 has no `tvl.legend`; candles are binned with `agg_by`, because plugin `auto_bin` produced a 0-based price axis), `trades_chart_simple.py`.
+- Notebooks: static `trades_static.py` (binds `trades_static`), `orderbooks_static.py` (binds `orderbooks_static`); live notebooks bind `trades` / `orderbooks`; live `trades_live_via_questdb_wal.py`, `orderbooks_live_via_questdb_wal.py` (add `latency_seconds`); charts `trades_chart_live.py` (TradingView candles + volume, tick lines; `tvl` plugin 0.0.1 has no `tvl.legend`; candles are binned with `agg_by`, because plugin `auto_bin` produced a 0-based price axis), `trades_chart_simple.py`.
 - `validation/` ad-hoc checks; `docs/` status, orderbooks, bug report, `history/`; `docker/cryptofeed/tests/` unit/integration/simulation + `run_tests.sh`.
 
 ## How to run
@@ -36,6 +36,9 @@ Exchanges -> cryptofeed -> ILP/HTTP (questdb:9000) -> QuestDB 10.0.1 (WAL tables
 - Format: `make format` (`uvx ruff format`). Tests: pytest via uvx.
 
 ## Gotchas
+
+- **DH editor overwrites files**: closing a notebook in the Deephaven UI writes its (possibly stale) editor buffer back to `data/deephaven/notebooks/`. Close files in the UI before editing them from outside, and re-check `git diff` afterwards.
+- **Tests are isolated**: `docker/cryptofeed/tests` write to throwaway `test_*` tables (dropped on teardown), never to live `trades` / `orderbooks`. Run with `uvx --with numpy --with "questdb[dataframe]" --with pandas pytest docker/cryptofeed/tests`.
 
 - **Timestamp precision**: tables must be TIMESTAMP_NS. If ILP writes beat the DDL, QuestDB auto-creates microsecond tables (fixed in 7b0bf73 with IF NOT EXISTS, 2s sleep, schema check). Deephaven rejects MICROSECOND units, so static loads must go through `qdb.to_table()`.
 - **Two connection paths**: static notebooks use ConnectorX (`get_connection()` returns a string); live notebooks use SQLAlchemy via `get_engine()`. Mixing them gives `'str' has no attribute 'connect'`.
