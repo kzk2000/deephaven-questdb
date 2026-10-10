@@ -1,4 +1,3 @@
-import asyncio
 import os
 
 import src.cryptofeed_tools as cft
@@ -64,13 +63,6 @@ def main():
             callbacks={TRADES: [write_to_questdb, cft.my_print]},
         )
     )
-
-    # Fix for Python 3.10+ asyncio event loop issue
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
 
     try:
         f.run()
