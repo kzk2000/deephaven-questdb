@@ -1346,7 +1346,7 @@ _PD_TABS = {"compare": "Deribit vs others", "prices": "Prices & basis", "volume"
 @ui.component
 def pd_app():
     asset, set_asset = ui.use_state("BTC")
-    ctype, set_ctype = ui.use_state("inverse")
+    ctype, set_ctype = ui.use_state("linear")
     window, set_window = ui.use_state("5m")
     tab, set_tab = ui.use_state("compare")
 
