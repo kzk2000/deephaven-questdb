@@ -6,10 +6,10 @@ $10k..$5M, per asset (BTC / ETH) and family:
     inverse = coin-margined -USD-PERP (Deribit, OKX, Bybit)
     linear  = -USDT-PERP and -USDC-PERP, USDT/USDC treated as USD (Deribit and Hyperliquid
               list USDC books, OKX / Binance / Bybit USDT)
-Venues come from perps_dash_lib.VENUES (data, not layout): a venue without data (Binance and
-Bybit are region blocked from this host) shows as a grey NO DATA row and lights up when rows
+Venues come from perps_dash_lib.VENUES (data, not layout): a venue without data (Binance is
+region blocked from this host) shows as a grey NO DATA row and lights up when rows
 arrive. Coverage matters: a venue's published book reaches only so far from mid (OKX 400
-levels, Hyperliquid 20), so wider buckets are lower bounds, shown as ">= ..." in amber.
+levels, Hyperliquid 20 plus aggregated books, Bybit 1000), so wider buckets are lower bounds, shown as ">= ..." in amber.
 
 Usage:
     exec(open('/data/storage/notebooks/perps_dashboard.py').read())
@@ -729,7 +729,7 @@ def pd_venue_tile(series, symbol, status, is_ref, note, mid, spread, reach, reac
                 PD_UP if reach_ok else PD_WARN,
                 "How far from mid the venue's published book reaches (min of bid and ask). "
                 "Depth buckets wider than this are lower bounds. Deribit publishes the full "
-                "book; OKX caps its feed at 400 levels per side, Hyperliquid at 20.",
+                "book; OKX caps its feed at 400 levels per side; Hyperliquid's far buckets are aggregated.",
             ),
             ui.text(exact, color=PD_MUTED, UNSAFE_style=_PD_NOTE_STYLE),
         ],
@@ -1102,7 +1102,7 @@ def pd_compare_tab(asset, ctype):
         depth_block,
         ui.text(
             "≥ amber = lower bound: the bucket is wider than the venue's published book "
-            "(OKX caps its public feed at 400 levels per side, Hyperliquid at 20). 'Common "
+            "(OKX caps its public feed at 400 levels per side; Hyperliquid's far buckets are aggregated). 'Common "
             "coverage' keeps only the buckets every live venue covers completely, for an "
             "apples-to-apples comparison. Bottom row: Deribit's multiple of the deepest other "
             "venue (≤ / ≥ when one side is a lower bound).",
