@@ -19,6 +19,10 @@ services:
   questdb:
     container_name: questdb
     image: questdb/questdb:10.0.1
+    environment:
+      # Column files are preallocated in append pages of this size (default 16M). A 42-column
+      # table with a few thousand rows occupied ~700 MB; 1M brings it to ~44 MB.
+      QDB_CAIRO_WRITER_DATA_APPEND_PAGE_SIZE: 1M
     ports:
       - 8812:8812
       - 9000:9000
