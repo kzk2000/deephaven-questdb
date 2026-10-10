@@ -42,7 +42,10 @@ build:
 # Build with drop tables (drops QuestDB tables before building)
 build_with_drop:
 	@echo "Dropping QuestDB tables..."
-	@curl -s "http://localhost:9000/exec?query=DROP%20MATERIALIZED%20VIEW%20IF%20EXISTS%20orderbooks_1s" >/dev/null 2>&1 || true
+	@# views over trades / orderbooks first (init_questdb_tables.py recreates them)
+	@for v in orderbooks_1s perps_trades_10s spot_trades_10s; do \
+		curl -s "http://localhost:9000/exec?query=DROP%20MATERIALIZED%20VIEW%20IF%20EXISTS%20$$v" >/dev/null 2>&1 || true; \
+	done
 	@curl -s "http://localhost:9000/exec?query=DROP%20TABLE%20IF%20EXISTS%20orderbooks" >/dev/null 2>&1 || true
 	@curl -s "http://localhost:9000/exec?query=DROP%20TABLE%20IF%20EXISTS%20trades" >/dev/null 2>&1 || true
 	@echo "✓ Tables dropped"
@@ -160,9 +163,9 @@ urls:
 	@echo "  QuestDB Web UI:  http://localhost:9000"
 	@echo ""
 	@echo "Database Connections:"
-	@echo "  QuestDB PostgreSQL: localhost:8812 (user=admin, pass=quest)"
-	@echo "  QuestDB ILP (HTTP): http://localhost:9000 (used by cryptofeed)"
-	@echo "  QuestDB ILP (TCP):  localhost:9009 (exposed, unused)"
+	@echo "  QuestDB PostgreSQL:      localhost:8812 (user=admin, pass=quest)"
+	@echo "  QuestDB QWP (WebSocket): localhost:9000 (cryptofeed ingest)"
+	@echo "  QuestDB ILP (TCP):       localhost:9009 (exposed, unused)"
 
 # Format Python code with ruff (via uvx)
 format:
