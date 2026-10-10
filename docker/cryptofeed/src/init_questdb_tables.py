@@ -81,7 +81,6 @@ def _perps_trades_view_ddl(name, interval):
 """
 
 
-PERPS_TRADES_1M_DDL = _perps_trades_view_ddl("perps_trades_1m", "1m")
 # 10 s buckets: the dashboard's rolling 1m/5m/15m volume windows and its price/volume series
 # are sums over these, so the browser never touches raw trades
 PERPS_TRADES_10S_DDL = _perps_trades_view_ddl("perps_trades_10s", "10s")
@@ -109,7 +108,6 @@ def init_perps_liquidity(host, http_port):
         ("perps_liquidity", PERPS_LIQUIDITY_DDL),
         ("TTL perps_liquidity (3 DAYS)", PERPS_LIQUIDITY_TTL_SQL),
         ("perps_liquidity_1m view", PERPS_LIQUIDITY_1M_DDL),
-        ("perps_trades_1m view", PERPS_TRADES_1M_DDL),
         ("perps_trades_10s view", PERPS_TRADES_10S_DDL),
         ("TTL perps_trades_10s (2 DAYS)", PERPS_TRADES_10S_TTL_SQL),
         ("spot_trades_10s view", SPOT_TRADES_10S_DDL),
