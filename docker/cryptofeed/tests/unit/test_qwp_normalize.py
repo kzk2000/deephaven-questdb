@@ -37,7 +37,9 @@ def test_dictionary_symbols_become_strings():
 def test_timestamps_keep_nanosecond_utc():
     out = normalize(_qwp_like_table())
     assert out.schema.field("timestamp").type == pa.timestamp("ns", tz="UTC")
-    assert out.column("timestamp").to_pylist() == _qwp_like_table().column("timestamp").to_pylist()
+    # compare the raw nanosecond integers: materializing ns timestamps as Python objects needs pandas
+    as_ns = lambda t: t.column("timestamp").cast(pa.int64()).to_pylist()  # noqa: E731
+    assert as_ns(out) == as_ns(_qwp_like_table())
 
 
 def test_nested_arrays_kept_by_default():

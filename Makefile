@@ -3,7 +3,7 @@
 # bash is required for `read -n` and `[[ ]]` in the clean target
 SHELL := /bin/bash
 
-.PHONY: help build build_with_drop up down restart clean rebuild ps logs logs-dh logs-qdb logs-cf test urls format
+.PHONY: help build build_with_drop up down restart clean rebuild ps logs logs-dh logs-qdb logs-cf test pytest urls format lock-cryptofeed lock-deephaven
 
 help:
 	@echo "Deephaven-QuestDB Development Commands"
@@ -32,6 +32,8 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  make format    - Format Python code with ruff"
+	@echo "  make pytest    - Run the Python test suite (pinned tool versions)"
+	@echo "  make lock-cryptofeed / lock-deephaven - Regenerate pinned dependency sets"
 
 # Build all images
 build:
@@ -133,6 +135,24 @@ test:
 	@echo "Table row counts:"
 	@python3 -c "import json, urllib.parse, urllib.request as u; q = lambda t: json.load(u.urlopen('http://localhost:9000/exec?query=' + urllib.parse.quote('SELECT count() FROM ' + t)))['dataset'][0][0]; [print(f'  {t:<14} {q(t):>9} rows') for t in ('trades', 'orderbooks', 'orderbooks_1s')]" 2>/dev/null || echo "  (row count query failed - is QuestDB up?)"
 
+# Python tests (unit + integration + simulation; needs the stack running for the latter two).
+# Tool and library versions are pinned so the result does not depend on what is latest today.
+pytest:
+	uvx --with numpy==2.5.3 --with questdb==5.0.0 --with pyarrow==26.0.0 pytest@9.1.1 docker/cryptofeed/tests -q
+
+# Regenerate the pinned dependency sets. Deliberate upgrades only: review the diff, rebuild, run tests.
+lock-cryptofeed:
+	docker run --rm -v "$(CURDIR)/docker/cryptofeed/requirements.txt:/r.txt:ro" python:3.13.16-bookworm \
+		sh -c "pip install -q -r /r.txt setuptools wheel && pip freeze --exclude-editable | grep -v '^src'" \
+		> docker/cryptofeed/constraints.txt.new && mv docker/cryptofeed/constraints.txt.new docker/cryptofeed/constraints.txt
+	@echo "Updated docker/cryptofeed/constraints.txt (re-add the header comment if you want it back)"
+
+lock-deephaven:
+	docker run --rm --entrypoint sh ghcr.io/deephaven/server-ui:42.6 -c \
+		"V=/opt/deephaven/venv/bin; \$$V/pip freeze | sort > /tmp/base && \$$V/pip install -q questdb connectorx SQLAlchemy psycopg2-binary deephaven-plugin-tradingview-lightweight && \$$V/pip freeze | sort | comm -13 /tmp/base -" \
+		> docker/deephaven/constraints.txt.new && mv docker/deephaven/constraints.txt.new docker/deephaven/constraints.txt
+	@echo "Updated docker/deephaven/constraints.txt (re-add the header comment if you want it back)"
+
 # Show service URLs
 urls:
 	@echo "Service URLs:"
@@ -146,4 +166,4 @@ urls:
 
 # Format Python code with ruff (via uvx)
 format:
-	uvx ruff format --no-cache
+	uvx ruff@0.17.0 format --no-cache

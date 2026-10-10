@@ -1,0 +1,9 @@
+# Exact versions of the packages added on top of ghcr.io/deephaven/server-ui (the base image
+# tag pins everything else). Applied with `pip install -c`.
+# Regenerate deliberately with `make lock-deephaven`, then rebuild and run the tests.
+connectorx==0.4.6
+deephaven-plugin-tradingview-lightweight==0.0.1
+psycopg2-binary==2.9.13
+questdb==5.0.0
+SQLAlchemy==2.1.4
+typing_extensions==4.16.0

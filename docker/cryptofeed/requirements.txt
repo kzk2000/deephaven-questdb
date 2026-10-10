@@ -1,3 +1,5 @@
-# websockets, msgspec, aiohttp, uvloop, order_book etc. are pulled in by cryptofeed 3.x
-cryptofeed==3.0.1
-questdb[dataframe]==5.0.0
+# Direct dependencies only; exact versions of everything are pinned in constraints.txt.
+# websockets, msgspec, aiohttp, uvloop, order_book etc. are pulled in by cryptofeed 3.x.
+# questdb needs numpy only (no [dataframe] extra: the writer sends rows, not DataFrames).
+cryptofeed
+questdb

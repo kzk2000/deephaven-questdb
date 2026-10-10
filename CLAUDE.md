@@ -39,7 +39,7 @@ Exchanges -> cryptofeed -> ILP/HTTP (questdb:9000) -> QuestDB 10.0.1 (WAL tables
 ## Gotchas
 
 - **DH editor overwrites files**: closing a notebook in the Deephaven UI writes its (possibly stale) editor buffer back to `data/deephaven/notebooks/`. Close files in the UI before editing them from outside, and re-check `git diff` afterwards.
-- **Tests are isolated**: `docker/cryptofeed/tests` write to throwaway `test_*` tables (dropped on teardown), never to live `trades` / `orderbooks`. Run with `uvx --with numpy --with "questdb[dataframe]" --with pandas pytest docker/cryptofeed/tests`.
+- **Tests are isolated**: `docker/cryptofeed/tests` write to throwaway `test_*` tables (dropped on teardown), never to live `trades` / `orderbooks`. Run with `make pytest`.
 
 - **Timestamp precision**: tables must be TIMESTAMP_NS. If ILP writes beat the DDL, QuestDB auto-creates microsecond tables (fixed in 7b0bf73 with IF NOT EXISTS, 2s sleep, schema check). Deephaven rejects MICROSECOND units, so static loads must go through `qdb.to_table()`.
 - **Two connection paths**: static notebooks use ConnectorX (`get_connection()` returns a string); live notebooks use SQLAlchemy via `get_engine()`. Mixing them gives `'str' has no attribute 'connect'`.

@@ -41,7 +41,7 @@ top 20 levels by default).
 
 ```bash
 make test        # health check and row counts
-uvx --with numpy --with "questdb[dataframe]" --with pandas pytest docker/cryptofeed/tests
+make pytest
 ```
 
 The integration and simulation tests write to throwaway `test_*` tables, never to `orderbooks`.

@@ -15,25 +15,21 @@ authors = [
 # docker/cryptofeed/requirements.txt
 cryptofeed = [
     "cryptofeed==3.0.1",
-    "questdb[dataframe]==5.0.0",
+    "questdb==5.0.0",
 ]
 
+# keep in sync with docker/deephaven/Dockerfile (pyarrow etc. come with the Deephaven base image)
 deephaven = [
-    "questdb",
-    "polars",
+    "questdb==5.0.0",
     "pyarrow",
-    "connectorx",
-    "websockets",
-    "orjson",
-    "seaborn",
-    "psycopg2-binary",
-    "sqlalchemy",
-    "adbc-driver-postgresql",
+    "connectorx==0.4.6",
+    "SQLAlchemy==2.1.4",
+    "psycopg2-binary==2.9.13",
     "deephaven-plugin-tradingview-lightweight==0.0.1",
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -43,6 +39,7 @@ bypass-selection = true
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+required-version = "==0.17.0"
 # Python only: ruff would otherwise reformat code blocks in the markdown docs
 extend-exclude = ["*.md", "data/questdb"]
 
