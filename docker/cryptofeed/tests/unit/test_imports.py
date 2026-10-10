@@ -3,6 +3,7 @@ Test that all imports work correctly after unification
 """
 
 import sys
+from unittest.mock import patch
 from pathlib import Path
 
 # Add src directory to path
@@ -36,12 +37,14 @@ def test_writer_initialization():
     # Default initialization
     writer1 = QuestDBWriter(host="localhost", verbose=False)
     assert writer1.host == "localhost"
-    assert writer1.ilp_port == 9009
+    assert writer1.ilp_port == 9000  # HTTP ILP shares the REST port
     assert writer1.http_port == 9000
+    assert writer1.protocol == "http"
     writer1.close()
 
     # Custom ports
-    writer2 = QuestDBWriter(host="localhost", ilp_port=9010, http_port=9001, verbose=False)
+    with patch("questdb_writer.Sender"):  # SDK connects on enter; no server on 9010
+        writer2 = QuestDBWriter(host="localhost", ilp_port=9010, http_port=9001, verbose=False)
     assert writer2.ilp_port == 9010
     assert writer2.http_port == 9001
     writer2.close()
@@ -53,9 +56,10 @@ def test_writer_has_ilp_and_rest_support():
 
     writer = QuestDBWriter(host="localhost", verbose=False)
 
-    # Check ILP attributes
-    assert hasattr(writer, "ilp_sock")
+    # Check ILP attributes (official SDK sender configured from a conf string)
+    assert hasattr(writer, "_sender")
     assert hasattr(writer, "ilp_port")
+    assert writer.conf.startswith("http::addr=")
 
     # Check REST attributes
     assert hasattr(writer, "base_url")

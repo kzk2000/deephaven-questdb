@@ -76,12 +76,14 @@ Test with simulated live data feeds.
 ### Example Unit Test
 ```python
 import sys
-sys.path.insert(0, '../src')
+
+sys.path.insert(0, "../src")
 from questdb_writer import QuestDBWriter
 
+
 def test_writer_initialization():
-    writer = QuestDBWriter('localhost', verbose=False)
-    assert writer.host == 'localhost'
+    writer = QuestDBWriter("localhost", verbose=False)
+    assert writer.host == "localhost"
     assert writer.ilp_port == 9009
     assert writer.http_port == 9000
     writer.close()
@@ -90,11 +92,13 @@ def test_writer_initialization():
 ### Example Integration Test
 ```python
 import sys
-sys.path.insert(0, '../src')
+
+sys.path.insert(0, "../src")
 from questdb_writer import QuestDBWriter
 
+
 def test_write_orderbook():
-    writer = QuestDBWriter('localhost', verbose=False)
+    writer = QuestDBWriter("localhost", verbose=False)
     # Create mock book...
     result = writer.write_orderbook(book, timestamp)
     assert result == True

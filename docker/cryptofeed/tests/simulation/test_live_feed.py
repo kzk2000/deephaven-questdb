@@ -43,7 +43,7 @@ class MockBook:
         )()
 
 
-def test_simulated_orderbook_feed():
+def test_simulated_orderbook_feed(writer):
     """
     Test simulated live orderbook feed
 
@@ -54,13 +54,13 @@ def test_simulated_orderbook_feed():
     print("Starting simulated orderbook feed test")
     print("=" * 80)
 
-    writer = QuestDBWriter(host="localhost", verbose=True)
+    table = writer.orderbooks_table
 
     exchanges = ["Coinbase", "Kraken", "Bitstamp"]
     symbols = ["BTC-USD", "ETH-USD"]
 
-    initial_count_result = writer.execute_sql("SELECT count() FROM orderbooks")
-    initial_count = initial_count_result["dataset"][0][0]
+    # Throwaway table does not exist until the first ILP row creates it
+    initial_count = 0
     print(f"\nInitial orderbook count: {initial_count}")
 
     # Simulate 30 orderbook updates (10 iterations, 3 exchanges)
@@ -93,7 +93,9 @@ def test_simulated_orderbook_feed():
     time.sleep(2)
 
     # Verify data growth
-    final_count_result = writer.execute_sql("SELECT count() FROM orderbooks")
+    writer.flush()
+    time.sleep(2)
+    final_count_result = writer.execute_sql(f"SELECT count() FROM {table}")
     final_count = final_count_result["dataset"][0][0]
 
     growth = final_count - initial_count
@@ -105,9 +107,9 @@ def test_simulated_orderbook_feed():
 
     # Show latest orderbooks per exchange/symbol
     print(f"\nLatest orderbooks:")
-    query = """
+    query = f"""
         SELECT exchange, symbol, timestamp
-        FROM orderbooks 
+        FROM {table}
         LATEST ON timestamp PARTITION BY exchange, symbol
     """
     result = writer.execute_sql(query)
@@ -116,12 +118,12 @@ def test_simulated_orderbook_feed():
         exchange, symbol, timestamp = row
         print(f"  {exchange:10s} {symbol:10s} {timestamp}")
 
-    writer.close()
-
     print("\n" + "=" * 80)
     print("✓ Simulation test passed")
     print("=" * 80)
 
 
 if __name__ == "__main__":
-    test_simulated_orderbook_feed()
+    import pytest
+
+    pytest.main([__file__, "-v", "-s"])

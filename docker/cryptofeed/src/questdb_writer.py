@@ -27,7 +27,16 @@ class QuestDBWriter:
     - REST API for SQL queries
     """
 
-    def __init__(self, host="127.0.0.1", ilp_port=9000, protocol="http", verbose=True):
+    def __init__(
+        self,
+        host="127.0.0.1",
+        ilp_port=9000,
+        protocol="http",
+        verbose=True,
+        http_port=9000,
+        trades_table="trades",
+        orderbooks_table="orderbooks",
+    ):
         """
         Initialize QuestDB writer with official SDK
 
@@ -36,17 +45,22 @@ class QuestDBWriter:
             ilp_port: ILP port - 9000 for HTTP (default), 9009 for TCP
             protocol: 'http' (recommended) or 'tcp' (default: 'http')
             verbose: Print initialization messages (default: True)
+            http_port: HTTP port for SQL queries via REST (default: 9000)
+            trades_table: Destination table for trades (default: 'trades')
+            orderbooks_table: Destination table for orderbooks (default: 'orderbooks')
         """
         self.host = host
         self.ilp_port = ilp_port
         self.protocol = protocol
         self.verbose = verbose
+        self.trades_table = trades_table
+        self.orderbooks_table = orderbooks_table
 
         # Build configuration string for the SDK
         self.conf = f"{protocol}::addr={host}:{ilp_port};"
 
         # HTTP port for SQL queries (REST API)
-        self.http_port = 9000
+        self.http_port = http_port
         self.base_url = f"http://{host}:{self.http_port}/exec"
 
         # Create sender and enter context (for persistent connection)
@@ -94,7 +108,7 @@ class QuestDBWriter:
 
             # Send via SDK (sender always exists from __init__)
             self._sender.row(
-                "trades",
+                self.trades_table,
                 symbols={
                     "exchange": exchange,
                     "symbol": symbol,
@@ -190,7 +204,7 @@ class QuestDBWriter:
 
             # Send via SDK (sender always exists from __init__)
             self._sender.row(
-                "orderbooks",
+                self.orderbooks_table,
                 symbols={"exchange": exchange, "symbol": symbol},
                 columns={"bids": bids_2d, "asks": asks_2d},
                 at=ts_nanos,

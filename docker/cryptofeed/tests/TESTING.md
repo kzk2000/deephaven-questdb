@@ -108,10 +108,11 @@ def test_with_writer(writer):
     result = writer.execute_sql("SELECT count() FROM trades")
     assert result is not None
 
+
 def test_with_mock_data(mock_orderbook, mock_trade):
     """Use pre-configured mock data"""
-    assert mock_orderbook.exchange == 'TEST'
-    assert mock_trade['symbol'] == 'BTC-USD'
+    assert mock_orderbook.exchange == "TEST"
+    assert mock_trade["symbol"] == "BTC-USD"
 ```
 
 ### Test Structure
@@ -121,13 +122,14 @@ import sys
 from pathlib import Path
 
 # Add src directory to path
-src_path = Path(__file__).parent.parent.parent / 'src'
+src_path = Path(__file__).parent.parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 from questdb_writer import QuestDBWriter
 
+
 def test_something():
-    writer = QuestDBWriter('localhost', verbose=False)
+    writer = QuestDBWriter("localhost", verbose=False)
     # ... test code ...
     writer.close()
 ```
@@ -180,7 +182,7 @@ ModuleNotFoundError: No module named 'questdb_writer'
 ```
 **Solution:** Ensure src path is added correctly
 ```python
-src_path = Path(__file__).parent.parent.parent / 'src'
+src_path = Path(__file__).parent.parent.parent / "src"
 sys.path.insert(0, str(src_path))
 ```
 

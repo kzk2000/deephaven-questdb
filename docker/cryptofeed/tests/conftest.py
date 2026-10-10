@@ -3,6 +3,9 @@ Shared pytest fixtures for QuestDB writer tests
 """
 
 import sys
+import urllib.parse
+import urllib.request
+import uuid
 import pytest
 from pathlib import Path
 
@@ -21,12 +24,50 @@ def questdb_host():
     return "localhost"
 
 
+def _drop_table(host, table):
+    """Best-effort DROP TABLE through the REST API."""
+    params = urllib.parse.urlencode({"query": f"DROP TABLE IF EXISTS {table}"})
+    try:
+        urllib.request.urlopen(f"http://{host}:9000/exec?{params}", timeout=10).read()
+    except Exception:
+        pass
+
+
+def _wait_for_rows(writer, table, min_rows=1, timeout=15.0):
+    """Flush the writer and poll until `table` has at least `min_rows` rows."""
+    writer.flush()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = writer.execute_sql(f"SELECT count() FROM {table}")
+        if result and result.get("dataset") and result["dataset"][0][0] >= min_rows:
+            return result["dataset"][0][0]
+        time.sleep(0.25)
+    raise AssertionError(f"{table} did not reach {min_rows} rows within {timeout}s")
+
+
+@pytest.fixture
+def wait_for_rows():
+    """Helper: flush a writer and poll until a table has rows."""
+    return _wait_for_rows
+
+
 @pytest.fixture
 def writer(questdb_host):
-    """Create QuestDB writer instance for testing"""
-    w = QuestDBWriter(host=questdb_host, verbose=False)
+    """QuestDB writer that targets throwaway tables, never the live trades/orderbooks.
+
+    Tables are auto-created by ILP on first write and dropped on teardown.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    w = QuestDBWriter(
+        host=questdb_host,
+        verbose=False,
+        trades_table=f"test_trades_{suffix}",
+        orderbooks_table=f"test_orderbooks_{suffix}",
+    )
     yield w
     w.close()
+    _drop_table(questdb_host, w.trades_table)
+    _drop_table(questdb_host, w.orderbooks_table)
 
 
 @pytest.fixture

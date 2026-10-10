@@ -4,6 +4,7 @@ Unit tests for QuestDB writer basic functionality
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 # Add src directory to path
 src_path = Path(__file__).parent.parent.parent / "src"
@@ -22,13 +23,31 @@ def test_writer_verbose_mode():
 
 def test_writer_connection_attributes():
     """Test writer has correct connection attributes"""
-    writer = QuestDBWriter(host="testhost", ilp_port=9999, http_port=8888, verbose=False)
+    # The SDK connects on enter; patch it so no server is needed
+    with patch("questdb_writer.Sender"):
+        writer = QuestDBWriter(host="testhost", ilp_port=9999, http_port=8888, verbose=False)
 
     assert writer.host == "testhost"
     assert writer.ilp_port == 9999
     assert writer.http_port == 8888
     assert writer.base_url == "http://testhost:8888/exec"
+    assert writer.conf == "http::addr=testhost:9999;"
 
+    writer.close()
+
+
+def test_writer_default_tables():
+    """Test default destination tables and that they are configurable"""
+    writer = QuestDBWriter(host="localhost", verbose=False)
+    assert writer.trades_table == "trades"
+    assert writer.orderbooks_table == "orderbooks"
+    writer.close()
+
+    writer = QuestDBWriter(
+        host="localhost", verbose=False, trades_table="t_x", orderbooks_table="o_x"
+    )
+    assert writer.trades_table == "t_x"
+    assert writer.orderbooks_table == "o_x"
     writer.close()
 
 

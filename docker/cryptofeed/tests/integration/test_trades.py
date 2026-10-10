@@ -1,7 +1,7 @@
 """
 Integration tests for trade writing to QuestDB
 
-Requires QuestDB to be running on localhost:9009 (ILP)
+Requires QuestDB to be running on localhost:9000. Writes go to throwaway tables.
 """
 
 import sys
@@ -26,7 +26,7 @@ def test_write_trade_to_questdb(writer, mock_trade):
     time.sleep(2)
 
     # Verify data was written (query via REST API)
-    query = "SELECT count() FROM trades WHERE symbol = 'BTC-USD'"
+    query = f"SELECT count() FROM {writer.trades_table} WHERE symbol = 'BTC-USD'"
     result = writer.execute_sql(query)
 
     assert result is not None
@@ -45,9 +45,9 @@ def test_trade_data_format(writer, mock_trade):
     time.sleep(2)
 
     # Query the latest trade
-    query = """
+    query = f"""
         SELECT exchange, symbol, side, price, size 
-        FROM trades 
+        FROM {writer.trades_table}
         WHERE symbol = 'BTC-USD' 
         ORDER BY timestamp DESC 
         LIMIT 1
@@ -80,7 +80,7 @@ def test_multiple_trades(writer, mock_trade):
     time.sleep(2)
 
     # Query count
-    query = "SELECT count() FROM trades"
+    query = f"SELECT count() FROM {writer.trades_table}"
     result = writer.execute_sql(query)
 
     count = result["dataset"][0][0]
