@@ -27,6 +27,7 @@ from abc import ABC
 
 import pyarrow as pa
 import qdb
+import qdb_pagecache
 from deephaven.experimental.table_data_service import (
     TableDataService,
     TableDataServiceBackend,
@@ -137,6 +138,7 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
             self._qwp = qdb_qwp.QwpReader(flatten_arrays=False)
         self._active_threads = {}
         self._lock = threading.Lock()
+        self._pages = qdb_pagecache.PageCache()
 
         print(
             f"[Backend] Created new QuestDBBackend instance (id={id(self)}, table='{table_name}', "
@@ -642,6 +644,65 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
     #  Column paging: use rowid ranges
     # -------------------------------------------------------------------------
 
+    def _load_page_pg(self, table_name, offset, max_rows):
+        """All columns of rows [offset, offset+max_rows) in one Postgres-wire query."""
+        import datetime
+
+        schema = self._get_schema_from_information_schema(table_name)
+        names = list(schema.names)
+        col_list = ", ".join(names)
+        # Use ROW_NUMBER() since QuestDB's Postgres wire does not support OFFSET
+        sql = f"""
+            WITH numbered AS (
+                SELECT {col_list}, ROW_NUMBER() OVER (ORDER BY {self._order_by_col}) AS rn
+                FROM {table_name}
+            )
+            SELECT {col_list}
+            FROM numbered
+            WHERE rn > %s AND rn <= %s
+        """
+        engine = qdb.get_engine()
+        with engine.connect() as conn:
+            with conn.connection.cursor() as cur:
+                started = time.perf_counter()
+                # QuestDB ROW_NUMBER() is 1-based; Deephaven's offset is 0-based
+                cur.execute(sql, (offset, offset + max_rows))
+                rows = cur.fetchall()
+                if self._verbose:
+                    print(
+                        f"[Backend:{table_name}] page query {(time.perf_counter() - started) * 1000:.1f}ms, "
+                        f"{len(rows)} rows, {len(names)} columns"
+                    )
+
+        arrays = {}
+        for position, name in enumerate(names):
+            values = [r[position] for r in rows]
+            field_type = schema.field(name).type
+            if pa.types.is_timestamp(field_type):
+                values = [
+                    v.replace(tzinfo=datetime.timezone.utc)
+                    if v and isinstance(v, datetime.datetime) and v.tzinfo is None
+                    else v
+                    for v in values
+                ]
+            elif pa.types.is_floating(field_type):
+                values = [float(v) if v is not None else None for v in values]
+            elif pa.types.is_string(field_type):
+                values = [str(v) if v is not None else None for v in values]
+            arrays[name] = pa.array(values, type=field_type)
+        return pa.table(arrays)
+
+    def _get_page(self, table_name, offset, min_rows, max_rows):
+        """One consistent snapshot of every column for a page (see qdb_pagecache)."""
+
+        def load():
+            if self._qwp is not None:
+                # Columnar Arrow page straight from QuestDB: no row loop, no ROW_NUMBER() scan
+                return self._qwp.page_all(table_name, offset, max_rows, self._order_by_col)
+            return self._load_page_pg(table_name, offset, max_rows)
+
+        return self._pages.get((table_name, offset, max_rows), min_rows, load)
+
     def column_values(
         self,
         table_key,
@@ -654,99 +715,22 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         failure_cb,
     ):
         """
-        Provide a single-column pyarrow.Table with rows [offset, offset+N),
-        using ROW_NUMBER() instead of LIMIT/OFFSET (QuestDB compatibility).
-        Deephaven's offset is 0-based; we assume _rowid is 1-based.
+        Provide a single-column pyarrow.Table with rows [offset, offset+N).
+
+        Deephaven asks for each column separately. They are all served from one page
+        loaded with a single query: separate queries per column let rows that arrive out of
+        timestamp order shift the window between them, mixing columns of different rows.
         """
         try:
             assert isinstance(table_key, QuestDBTableKey)
             table_name = table_key.table_name
-
-            # Timing for debugging
             if self._verbose:
-                import datetime
-
-                start_time = datetime.datetime.now()
-                ts = start_time.strftime("%H:%M:%S.%f")[:-3]
                 print(
-                    f"[Backend:{table_name}] [{ts}] column_values: col={col}, offset={offset}, max_rows={max_rows}"
+                    f"[Backend:{table_name}] column_values: col={col}, offset={offset}, "
+                    f"min_rows={min_rows}, max_rows={max_rows}"
                 )
-
-            if self._qwp is not None:
-                # Columnar Arrow page straight from QuestDB: no row loop, no ROW_NUMBER() scan
-                values_cb(self._qwp.page(table_name, col, offset, max_rows, self._order_by_col))
-                return
-
-            # Use ROW_NUMBER() since QuestDB doesn't support OFFSET
-            sql = f"""
-                WITH numbered AS (
-                    SELECT {col}, ROW_NUMBER() OVER (ORDER BY {self._order_by_col}) as rn
-                    FROM {table_name}
-                )
-                SELECT {col}
-                FROM numbered
-                WHERE rn > %s AND rn <= %s
-            """
-
-            engine = qdb.get_engine()
-            with engine.connect() as conn:
-                with conn.connection.cursor() as cur:
-                    # QuestDB ROW_NUMBER() is 1-based
-                    start_rn = offset
-                    end_rn = offset + max_rows
-
-                    if self._verbose:
-                        query_start = datetime.datetime.now()
-
-                    cur.execute(sql, (start_rn, end_rn))
-                    rows = cur.fetchall()
-
-                    if self._verbose:
-                        query_end = datetime.datetime.now()
-                        query_ms = (query_end - query_start).total_seconds() * 1000
-                        print(
-                            f"[Backend:{table_name}] Query took {query_ms:.1f}ms, returned {len(rows)} rows"
-                        )
-
-            values = [r[0] for r in rows]
-
-            # Convert to PyArrow with proper types
-            # Get the column type from schema
-            schema = None
-            for field in self._get_schema_from_information_schema(table_name).names:
-                if field == col:
-                    schema = self._get_schema_from_information_schema(table_name)
-                    break
-
-            if schema and col in schema.names:
-                field_type = schema.field(col).type
-
-                if pa.types.is_timestamp(field_type):
-                    import datetime
-
-                    # Ensure timezone aware
-                    values = [
-                        v.replace(tzinfo=datetime.timezone.utc)
-                        if v and isinstance(v, datetime.datetime) and v.tzinfo is None
-                        else v
-                        for v in values
-                    ]
-                    arrow_array = pa.array(values, type=field_type)
-                    pa_table = pa.table({col: arrow_array})
-                elif pa.types.is_floating(field_type):
-                    values = [float(v) if v is not None else None for v in values]
-                    arrow_array = pa.array(values, type=field_type)
-                    pa_table = pa.table({col: arrow_array})
-                elif pa.types.is_string(field_type):
-                    values = [str(v) if v is not None else None for v in values]
-                    arrow_array = pa.array(values, type=field_type)
-                    pa_table = pa.table({col: arrow_array})
-                else:
-                    pa_table = pa.Table.from_pydict({col: values})
-            else:
-                pa_table = pa.Table.from_pydict({col: values})
-
-            values_cb(pa_table)
+            page = self._get_page(table_name, offset, min_rows, max_rows)
+            values_cb(pa.table({col: page.column(col)}))
         except Exception as e:
             failure_cb(e)
 
