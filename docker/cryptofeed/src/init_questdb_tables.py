@@ -159,21 +159,17 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
 
     if wait_for_db:
         print(f"Waiting for QuestDB at {host}:{http_port}...")
+        # execute_sql returns None (it does not raise) while QuestDB is unreachable
         for attempt in range(max_retries):
-            try:
-                result = execute_sql(host, http_port, "SELECT 1")
-                if result:
-                    print("✅ QuestDB is ready!")
-                    break
-            except Exception:
-                if attempt < max_retries - 1:
-                    print(
-                        f"  Attempt {attempt + 1}/{max_retries}: QuestDB not ready yet, waiting..."
-                    )
-                    time.sleep(2)
-                else:
-                    print(f"❌ Failed to connect to QuestDB after {max_retries} attempts")
-                    sys.exit(1)
+            if execute_sql(host, http_port, "SELECT 1"):
+                print("✅ QuestDB is ready!")
+                break
+            if attempt < max_retries - 1:
+                print(f"  Attempt {attempt + 1}/{max_retries}: QuestDB not ready yet, waiting...")
+                time.sleep(2)
+            else:
+                print(f"❌ Failed to connect to QuestDB after {max_retries} attempts")
+                sys.exit(1)
 
     print("\n📊 Initializing QuestDB tables...")
 
