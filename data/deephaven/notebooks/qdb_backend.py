@@ -132,9 +132,9 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         if transport == "qwp":
             import qdb_qwp
 
-            # Deephaven rejects nested DOUBLE[][] columns, so arrays are rendered as strings, which is
-            # what the Postgres-wire path produced
-            self._qwp = qdb_qwp.QwpReader(flatten_arrays=True)
+            # DOUBLE[][] columns arrive as real double[][] (schema hinted in qdb_qwp); pass
+            # flatten_arrays=True to get JSON strings like the Postgres-wire path instead
+            self._qwp = qdb_qwp.QwpReader(flatten_arrays=False)
         self._active_threads = {}
         self._lock = threading.Lock()
 

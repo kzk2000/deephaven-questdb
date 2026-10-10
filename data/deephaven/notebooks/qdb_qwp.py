@@ -15,9 +15,11 @@ timestamps, so TIMESTAMP_NS columns are exact end to end.
 Type normalization (`normalize`) keeps the Arrow table directly consumable by Deephaven:
     - dictionary-encoded SYMBOL columns are decoded to plain strings
     - timestamps stay timestamp[ns, tz=UTC]
-    - DOUBLE[][] (list<list<double>>) cannot be consumed by Deephaven's TableDataService (it
-      declares double[] but receives double[][]), so flatten_arrays=True renders such columns
-      as JSON strings, the representation the Postgres-wire path produced
+    - DOUBLE[][] (list<list<double>>) is kept as a nested list, and `with_deephaven_hints`
+      annotates the schema field with deephaven:type="double[][]". Without the hint
+      TableDataService infers double[] from the nested list and then rejects the double[][]
+      data ("Received incompatible column definition"). flatten_arrays=True is the escape
+      hatch that renders such columns as JSON strings instead
 """
 
 import json
@@ -27,6 +29,67 @@ import pyarrow as pa
 import questdb
 
 DEFAULT_CONF = "ws::addr=questdb:9000;"
+
+# Arrow primitive -> Deephaven element type name (as used in deephaven:type metadata)
+_DH_ELEMENT_TYPES = {
+    pa.float64(): "double",
+    pa.float32(): "float",
+    pa.int64(): "long",
+    pa.int32(): "int",
+    pa.int16(): "short",
+    pa.int8(): "byte",
+    pa.bool_(): "boolean",
+}
+
+
+def deephaven_type_hint(arrow_type: pa.DataType):
+    """`deephaven:type` for lists nested two or more levels deep (e.g. "double[][]"), else None.
+
+    One-level lists already map correctly (list<double> -> double[]).
+    """
+    depth = 0
+    t = arrow_type
+    while pa.types.is_list(t) or pa.types.is_large_list(t) or pa.types.is_fixed_size_list(t):
+        depth += 1
+        t = t.value_type
+    if depth >= 2 and t in _DH_ELEMENT_TYPES:
+        return _DH_ELEMENT_TYPES[t] + "[]" * depth
+    return None
+
+
+def apply_array_dimensions(schema: pa.Schema, dims: dict) -> pa.Schema:
+    """Rebuild array fields with their true nesting depth.
+
+    A zero-row QWP result reports every array column as list<double>; the dimensionality is
+    only visible in actual data. `dims` maps column name -> number of dimensions (from
+    table_columns(), e.g. DOUBLE[][] -> 2), which is exact and also works on empty tables.
+    """
+    fields = []
+    for field in schema:
+        n = dims.get(field.name, 0)
+        t = field.type
+        depth = 0
+        while pa.types.is_list(t) or pa.types.is_large_list(t):
+            depth += 1
+            t = t.value_type
+        if n > depth >= 1:
+            new_type = t
+            for _ in range(n):
+                new_type = pa.list_(new_type)
+            field = pa.field(field.name, new_type, field.nullable, field.metadata)
+        fields.append(field)
+    return pa.schema(fields)
+
+
+def with_deephaven_hints(schema: pa.Schema) -> pa.Schema:
+    """Attach deephaven:type metadata to nested-list fields so TableDataService types them."""
+    fields = []
+    for field in schema:
+        hint = deephaven_type_hint(field.type)
+        if hint is not None:
+            field = field.with_metadata({"deephaven:type": hint})
+        fields.append(field)
+    return pa.schema(fields)
 
 
 def normalize(table: pa.Table, flatten_arrays: bool = False) -> pa.Table:
@@ -89,8 +152,19 @@ class QwpReader:
     # --- helpers the backend needs -------------------------------------------------
 
     def schema(self, table: str) -> pa.Schema:
-        """Exact Arrow schema of a table (zero-row query), normalized."""
-        return normalize(self.arrow(f"SELECT * FROM {table} LIMIT 0"), self._flatten_arrays).schema
+        """Exact Arrow schema of a table (zero-row query), normalized and Deephaven-hinted."""
+        schema = normalize(
+            self.arrow(f"SELECT * FROM {table} LIMIT 0"), self._flatten_arrays
+        ).schema
+        if self._flatten_arrays:
+            return schema
+        # a zero-row result cannot tell DOUBLE[] from DOUBLE[][]; table_columns() can
+        cols = self.arrow(f"SELECT \"column\" AS c, type AS t FROM table_columns('{table}')")
+        dims = {
+            c: t.count("[]")
+            for c, t in zip(cols.column("c").to_pylist(), cols.column("t").to_pylist())
+        }
+        return with_deephaven_hints(apply_array_dimensions(schema, dims))
 
     def row_count(self, table: str) -> int:
         return int(self.arrow(f"SELECT count() AS n FROM {table}").column("n")[0].as_py())
