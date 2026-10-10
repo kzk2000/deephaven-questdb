@@ -39,7 +39,7 @@ def test_liquidity_table_has_every_metric_column():
     import perps
 
     ddl = init.PERPS_LIQUIDITY_DDL
-    assert "PARTITION BY DAY" in ddl and "perps_liquidity" in ddl
+    assert "PARTITION BY HOUR" in ddl and "perps_liquidity" in ddl
     for column in perps.LIQUIDITY_DOUBLE_COLUMNS + perps.LIQUIDITY_LONG_COLUMNS:
         assert f"{column} " in ddl, column
     # the headline buckets and slippage sizes the dashboard reads
@@ -48,6 +48,14 @@ def test_liquidity_table_has_every_metric_column():
 
 
 def test_liquidity_view_exists():
+    # every table and view is hourly: smaller partitions bound the rewrite of each commit
+    for ddl in (
+        init.PERPS_LIQUIDITY_1M_DDL,
+        init.PERPS_TRADES_10S_DDL,
+        init.SPOT_TRADES_10S_DDL,
+    ):
+        assert ") PARTITION BY HOUR" in ddl
+
     assert "perps_liquidity_1m" in init.PERPS_LIQUIDITY_1M_DDL
     assert "SAMPLE BY 1m" in init.PERPS_LIQUIDITY_1M_DDL
     assert "avg(bid_usd_100bp)" in init.PERPS_LIQUIDITY_1M_DDL

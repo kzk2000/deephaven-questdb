@@ -40,7 +40,7 @@ def _liquidity_ddl():
     body = ",\n        ".join(columns)
     return (
         f"CREATE TABLE IF NOT EXISTS perps_liquidity (\n        {body}\n"
-        ") TIMESTAMP(timestamp) PARTITION BY DAY WAL"
+        ") TIMESTAMP(timestamp) PARTITION BY HOUR WAL"
     )
 
 
@@ -53,9 +53,9 @@ def _liquidity_1m_view_ddl():
     spread = ["min(spread_bps) AS spread_bps_min", "max(spread_bps) AS spread_bps_max"]
     select = ",\n        ".join(avg + reach + spread + ["count() AS samples"])
     return (
-        "CREATE MATERIALIZED VIEW IF NOT EXISTS perps_liquidity_1m AS\n"
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS perps_liquidity_1m AS (\n"
         f"    SELECT timestamp, exchange, symbol,\n        {select}\n"
-        "    FROM perps_liquidity\n    SAMPLE BY 1m"
+        "    FROM perps_liquidity\n    SAMPLE BY 1m\n) PARTITION BY HOUR"
     )
 
 
@@ -67,7 +67,7 @@ PERPS_LIQUIDITY_1M_DDL = _liquidity_1m_view_ddl()
 def _perps_trades_view_ddl(name, interval):
     """OHLC, volume, USD notional, buy/sell notional and trade count of the perps trades."""
     return f"""
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {name} AS
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {name} AS (
     SELECT timestamp, exchange, symbol,
         first(price) AS open, max(price) AS high, min(price) AS low, last(price) AS close,
         sum(size) AS volume_base,
@@ -78,6 +78,7 @@ def _perps_trades_view_ddl(name, interval):
     FROM trades
     WHERE contract_type <> 'spot'
     SAMPLE BY {interval}
+    ) PARTITION BY HOUR
 """
 
 
@@ -88,7 +89,7 @@ PERPS_TRADES_10S_TTL_SQL = "ALTER MATERIALIZED VIEW perps_trades_10s SET TTL 2 D
 
 # Spot reference prices / volume in the same 10 s buckets (premium of perps vs spot)
 SPOT_TRADES_10S_DDL = """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS spot_trades_10s AS
+    CREATE MATERIALIZED VIEW IF NOT EXISTS spot_trades_10s AS (
     SELECT timestamp, exchange, symbol,
         last(price) AS close,
         sum(size) AS volume_base,
@@ -97,6 +98,7 @@ SPOT_TRADES_10S_DDL = """
     FROM trades
     WHERE contract_type = 'spot'
     SAMPLE BY 10s
+    ) PARTITION BY HOUR
 """
 SPOT_TRADES_10S_TTL_SQL = "ALTER MATERIALIZED VIEW spot_trades_10s SET TTL 2 DAYS"
 
@@ -189,7 +191,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
             contract_size DOUBLE,
             contract_type SYMBOL CAPACITY 16 CACHE,
             notional_usd DOUBLE
-        ) TIMESTAMP(timestamp) PARTITION BY DAY WAL
+        ) TIMESTAMP(timestamp) PARTITION BY HOUR WAL
     """
     result = execute_sql(host, http_port, trades_sql)
     if result and result.get("ddl") == "OK":
@@ -303,15 +305,16 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     # Create materialized view with IF NOT EXISTS
     print("  Creating materialized view: orderbooks_1s")
     mv_sql = """
-        CREATE MATERIALIZED VIEW IF NOT EXISTS orderbooks_1s AS 
-        SELECT 
-            timestamp, 
-            exchange, 
-            symbol, 
-            last(bids) AS bids, 
-            last(asks) AS asks 
-        FROM orderbooks 
+        CREATE MATERIALIZED VIEW IF NOT EXISTS orderbooks_1s AS (
+        SELECT
+            timestamp,
+            exchange,
+            symbol,
+            last(bids) AS bids,
+            last(asks) AS asks
+        FROM orderbooks
         SAMPLE BY 1s
+        ) PARTITION BY HOUR
     """
     result = execute_sql(host, http_port, mv_sql)
     if result and result.get("ddl") == "OK":
@@ -361,9 +364,9 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     print("📋 Table Configuration Summary:")
     print(f"  {'Table':<25} {'Type':<25} {'Partition':<10} {'TTL':<15}")
     print(f"  {'-' * 25} {'-' * 25} {'-' * 10} {'-' * 15}")
-    print(f"  {'trades':<25} {'DEDUP on trade_id':<25} {'DAY':<10} {'None':<15}")
+    print(f"  {'trades':<25} {'DEDUP on trade_id':<25} {'HOUR':<10} {'None':<15}")
     print(f"  {'orderbooks':<25} {'DOUBLE[][] Arrays':<25} {'HOUR':<10} {'1 HOURS':<15}")
-    print(f"  {'orderbooks_1s':<25} {'Materialized View':<25} {'N/A':<10} {'N/A':<15}")
+    print(f"  {'orderbooks_1s':<25} {'Materialized View':<25} {'HOUR':<10} {'None':<15}")
     print()
     print("📊 Ready for crypto data ingestion!")
     print("   - Trades table will store individual trade events")
