@@ -54,3 +54,16 @@ def test_liquidity_views_exist_and_filter_perps_trades():
     assert "min(bid_reach_bps)" in init.PERPS_LIQUIDITY_1M_DDL  # worst coverage, not an average
     assert "contract_type <> 'spot'" in init.PERPS_TRADES_1M_DDL
     assert "buy_notional_usd" in init.PERPS_TRADES_1M_DDL
+
+
+def test_ten_second_views_back_the_dashboard_windows():
+    assert "perps_trades_10s" in init.PERPS_TRADES_10S_DDL
+    assert "SAMPLE BY 10s" in init.PERPS_TRADES_10S_DDL
+    assert "contract_type <> 'spot'" in init.PERPS_TRADES_10S_DDL
+    # same shape as the 1 minute view so consumers can switch interval
+    for column in ("open", "high", "low", "close", "volume_base", "notional_usd", "trades"):
+        assert f"AS {column}" in init.PERPS_TRADES_10S_DDL
+        assert f"AS {column}" in init.PERPS_TRADES_1M_DDL
+    assert "contract_type = 'spot'" in init.SPOT_TRADES_10S_DDL
+    assert "SAMPLE BY 10s" in init.SPOT_TRADES_10S_DDL
+    assert init.PERPS_TRADES_10S_TTL_SQL.startswith("ALTER MATERIALIZED VIEW perps_trades_10s")

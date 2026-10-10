@@ -169,6 +169,10 @@ class QwpReader:
     def row_count(self, table: str) -> int:
         return int(self.arrow(f"SELECT count() AS n FROM {table}").column("n")[0].as_py())
 
+    def page_sql(self, sql: str) -> pa.Table:
+        """Run arbitrary SQL and return the result normalized for Deephaven."""
+        return normalize(self.arrow(sql), self._flatten_arrays)
+
     def page_all(self, table: str, offset: int, count: int, order_by: str) -> pa.Table:
         """Rows [offset, offset+count) of every column in one query: a consistent snapshot."""
         lo, hi = int(offset), int(offset) + int(count)

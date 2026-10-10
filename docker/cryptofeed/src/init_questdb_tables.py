@@ -62,8 +62,12 @@ def _liquidity_1m_view_ddl():
 PERPS_LIQUIDITY_DDL = _liquidity_ddl()
 PERPS_LIQUIDITY_TTL_SQL = "ALTER TABLE perps_liquidity SET TTL 3 DAYS"
 PERPS_LIQUIDITY_1M_DDL = _liquidity_1m_view_ddl()
-PERPS_TRADES_1M_DDL = """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS perps_trades_1m AS
+
+
+def _perps_trades_view_ddl(name, interval):
+    """OHLC, volume, USD notional, buy/sell notional and trade count of the perps trades."""
+    return f"""
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {name} AS
     SELECT timestamp, exchange, symbol,
         first(price) AS open, max(price) AS high, min(price) AS low, last(price) AS close,
         sum(size) AS volume_base,
@@ -73,8 +77,29 @@ PERPS_TRADES_1M_DDL = """
         count() AS trades
     FROM trades
     WHERE contract_type <> 'spot'
-    SAMPLE BY 1m
+    SAMPLE BY {interval}
 """
+
+
+PERPS_TRADES_1M_DDL = _perps_trades_view_ddl("perps_trades_1m", "1m")
+# 10 s buckets: the dashboard's rolling 1m/5m/15m volume windows and its price/volume series
+# are sums over these, so the browser never touches raw trades
+PERPS_TRADES_10S_DDL = _perps_trades_view_ddl("perps_trades_10s", "10s")
+PERPS_TRADES_10S_TTL_SQL = "ALTER MATERIALIZED VIEW perps_trades_10s SET TTL 2 DAYS"
+
+# Spot reference prices / volume in the same 10 s buckets (premium of perps vs spot)
+SPOT_TRADES_10S_DDL = """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS spot_trades_10s AS
+    SELECT timestamp, exchange, symbol,
+        last(price) AS close,
+        sum(size) AS volume_base,
+        sum(notional_usd) AS notional_usd,
+        count() AS trades
+    FROM trades
+    WHERE contract_type = 'spot'
+    SAMPLE BY 10s
+"""
+SPOT_TRADES_10S_TTL_SQL = "ALTER MATERIALIZED VIEW spot_trades_10s SET TTL 2 DAYS"
 
 
 def init_perps_liquidity(host, http_port):
@@ -85,6 +110,10 @@ def init_perps_liquidity(host, http_port):
         ("TTL perps_liquidity (3 DAYS)", PERPS_LIQUIDITY_TTL_SQL),
         ("perps_liquidity_1m view", PERPS_LIQUIDITY_1M_DDL),
         ("perps_trades_1m view", PERPS_TRADES_1M_DDL),
+        ("perps_trades_10s view", PERPS_TRADES_10S_DDL),
+        ("TTL perps_trades_10s (2 DAYS)", PERPS_TRADES_10S_TTL_SQL),
+        ("spot_trades_10s view", SPOT_TRADES_10S_DDL),
+        ("TTL spot_trades_10s (2 DAYS)", SPOT_TRADES_10S_TTL_SQL),
     )
     for label, sql in steps:
         result = execute_sql(host, http_port, sql)
