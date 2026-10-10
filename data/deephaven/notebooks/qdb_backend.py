@@ -1,33 +1,37 @@
 """
-QuestDB Backend for Deephaven TableDataService
+QuestDB backend for Deephaven's TableDataService: QuestDB keeps the data, Deephaven pages it in.
 
-This module provides a live streaming backend that connects QuestDB tables
-to Deephaven via the TableDataService API.
+    from qdb_backend import create_live_table
+    trades = create_live_table("trades")                    # whole table, ticking
+    books = create_live_table("orderbooks", history_seconds=600)
 
-Features:
-- Singleton pattern: one backend instance per table
-- Live streaming with automatic size monitoring
-- Thread-safe with proper cleanup
-- Re-runnable without restart
+How rows stay correct. TableDataService addresses rows by position and fetches each column
+lazily, at different moments, and may re-read pages later; the size it is told may only grow.
+QuestDB orders rows by their (exchange) timestamp, so a row that arrives late is inserted in the
+middle and shifts every later position: with plain `ORDER BY timestamp LIMIT lo,hi` paging,
+0.9% of live rows had columns glued from different rows. So the table exposes only a *settled
+prefix* (see qdb_prefix.py):
 
-Usage:
-    from qdb_backend import QuestDBBackend, QuestDBTableKey, create_live_table
+    rows with  start <= timestamp < watermark,  watermark = min(max(timestamp), now) - settle
 
-    # Create a live table
-    trades = create_live_table('trades')
+ordered by timestamp plus a total tiebreak (the DEDUP upsert keys, then every other column).
+The watermark only advances, positions below the published size never move, and every column
+of a page is served from one query (qdb_pagecache). Rows therefore appear `settle_seconds`
+after their timestamp (plus up to one poll). A row arriving later than that is not added (the
+table cannot retract) but is counted (`backend.prefix.late_rows`) and logged; a published row
+that disappears (TTL dropping its partition) is served as a null row (`missing_rows`).
+Neither can shift other rows: each ~1 s segment keeps its frozen row count.
 
-    # Stop monitoring
-    from qdb_backend import stop_monitoring
-    stop_monitoring()
+API: create_live_table, set_verbose, stop_monitoring, get_backend.
 """
 
+import datetime
 import threading
 import time
-from abc import ABC
 
 import pyarrow as pa
-import qdb
 import qdb_pagecache
+import qdb_prefix
 from deephaven.experimental.table_data_service import (
     TableDataService,
     TableDataServiceBackend,
@@ -42,27 +46,23 @@ from deephaven.liveness_scope import LivenessScope
 
 DEFAULT_ORDER_BY_COL = "timestamp"
 DEFAULT_PAGE_SIZE = 64_000
-WAL_IDLE_SLEEP_SEC = 0.05  # Polling interval for size changes
-
+DEFAULT_TRANSPORT = "qwp"
+# How far the watermark trails min(max(timestamp), now). Measured on the five live feeds (see
+# CLAUDE.md): p99.9 of rows land < 1 s behind, the slowest seen ~1.3 s.
+DEFAULT_SETTLE_SECONDS = 3.0
+POLL_SECONDS = 0.05
 
 # =============================================================================
-#  Global Registry (Singleton per table)
+#  Global registry: one backend per table, survives re-running a notebook
 # =============================================================================
 
-# Global registry to track backends BY TABLE NAME (singleton per table)
-# This MUST be at module level to persist when class is redefined
 if "_GLOBAL_BACKENDS_BY_TABLE" not in globals():
     _GLOBAL_BACKENDS_BY_TABLE = {}  # table_name -> backend instance
     _GLOBAL_BACKEND_LOCK = threading.Lock()
 
 
-# =============================================================================
-#  TableKey & TableLocationKey
-# =============================================================================
-
-
 class QuestDBTableKey(TableKey):
-    """TableKey implementation for QuestDB tables"""
+    """TableKey for a QuestDB table"""
 
     def __init__(self, table_name: str):
         self.table_name = table_name
@@ -95,240 +95,264 @@ class QuestDBTableLocationKey(TableLocationKey):
 
 SINGLE_LOCATION_KEY = QuestDBTableLocationKey("main")
 
+# =============================================================================
+#  Transports: QWP (Arrow over WebSocket) or Postgres wire
+# =============================================================================
+
+
+class _QwpSource:
+    """Reads over QWP: columnar Arrow, nanosecond timestamps, DOUBLE[][] as double[][]."""
+
+    def __init__(self):
+        import qdb_qwp
+
+        self._reader = qdb_qwp.QwpReader(flatten_arrays=False)
+
+    def schema(self, table):
+        return self._reader.schema(table)
+
+    def rows(self, sql):
+        return [tuple(r.values()) for r in self._reader.arrow(sql).to_pylist()]
+
+    def table(self, sql, schema):
+        return self._reader.page_sql(sql)
+
+    def close(self):
+        self._reader.close()
+
+
+class _PgSource:
+    """Reads over the Postgres wire (psycopg2 via SQLAlchemy); arrays arrive as strings."""
+
+    _TYPES = {
+        "TIMESTAMP": pa.timestamp("us", tz="UTC"),
+        "TIMESTAMP_NS": pa.timestamp("us", tz="UTC"),
+        "DOUBLE": pa.float64(),
+        "FLOAT": pa.float32(),
+        "INT": pa.int32(),
+        "LONG": pa.int64(),
+        "SHORT": pa.int16(),
+        "BYTE": pa.int8(),
+        "BOOLEAN": pa.bool_(),
+    }
+
+    def rows(self, sql):
+        import qdb
+
+        with qdb.get_engine().connect() as conn:
+            with conn.connection.cursor() as cur:
+                cur.execute(sql)
+                return cur.fetchall()
+
+    def schema(self, table):
+        cols = self.rows(f"SELECT \"column\", type FROM table_columns('{table}')")
+        if not cols:
+            raise RuntimeError(f"Table {table!r} not found or no columns")
+        return pa.schema([pa.field(c, self._TYPES.get(t, pa.string())) for c, t in cols])
+
+    def table(self, sql, schema):
+        rows = self.rows(sql)
+        arrays = {}
+        for i, field in enumerate(schema):
+            values = [r[i] for r in rows]
+            if pa.types.is_timestamp(field.type):
+                values = [
+                    v.replace(tzinfo=datetime.timezone.utc)
+                    if isinstance(v, datetime.datetime) and v.tzinfo is None
+                    else v
+                    for v in values
+                ]
+            elif pa.types.is_floating(field.type):
+                values = [float(v) if v is not None else None for v in values]
+            elif pa.types.is_string(field.type):
+                values = [str(v) if v is not None else None for v in values]
+            arrays[field.name] = pa.array(values, type=field.type)
+        return pa.table(arrays)
+
+    def close(self):
+        pass
+
 
 # =============================================================================
-#  Backend Implementation
+#  Backend
 # =============================================================================
 
 
-class QuestDBBackend(TableDataServiceBackend, ABC):
-    """
-    QuestDB-backed TableDataServiceBackend with live streaming.
-
-    Features:
-    - One QuestDB table -> one Deephaven table key
-    - Single location (no partitioning yet)
-    - Append-only, ordered by order_by_col (e.g., timestamp)
-    - Polls count(*) to detect new rows
-    - Uses ROW_NUMBER() for paging (QuestDB doesn't support OFFSET)
-    - Smart thread management: stops old threads before starting new ones
-    """
+class QuestDBBackend(TableDataServiceBackend):
+    """One QuestDB table -> one Deephaven table key, single location, settled-prefix paging."""
 
     def __init__(
         self,
+        table_name: str,
         order_by_col: str = DEFAULT_ORDER_BY_COL,
-        table_name: str = None,
         verbose: bool = False,
-        transport: str = "pg",
+        transport: str = DEFAULT_TRANSPORT,
+        settle_seconds: float = DEFAULT_SETTLE_SECONDS,
+        history_seconds: float = None,
     ):
         super().__init__()
         if transport not in ("pg", "qwp"):
             raise ValueError(f"transport must be 'pg' or 'qwp', got {transport!r}")
-        self._order_by_col = order_by_col
         self._table_name = table_name
+        self._order_by_col = order_by_col
         self._verbose = verbose
         self._transport = transport
-        # QWP reads: Arrow batches over WebSocket, LIMIT lo,hi paging (see qdb_qwp.py)
-        self._qwp = None
-        if transport == "qwp":
-            import qdb_qwp
-
-            # DOUBLE[][] columns arrive as real double[][] (schema hinted in qdb_qwp); pass
-            # flatten_arrays=True to get JSON strings like the Postgres-wire path instead
-            self._qwp = qdb_qwp.QwpReader(flatten_arrays=False)
-        self._active_threads = {}
-        self._lock = threading.Lock()
+        self.settle_seconds = settle_seconds
+        self.history_seconds = history_seconds
+        self._source = _QwpSource() if transport == "qwp" else _PgSource()
+        self._lock = threading.RLock()
+        self._schema = None
+        self.prefix = None  # qdb_prefix.StablePrefix, created on first use
+        self._subscribers = {}  # id -> size_cb
+        self._thread = None
+        self._stop = threading.Event()
         self._pages = qdb_pagecache.PageCache()
-
+        self.null_rows_served = 0
         print(
-            f"[Backend] Created new QuestDBBackend instance (id={id(self)}, table='{table_name}', "
-            f"transport={transport})"
+            f"[Backend] new QuestDBBackend table='{table_name}' transport={transport} "
+            f"settle={settle_seconds}s history={'all' if history_seconds is None else history_seconds}"
         )
 
-    def __del__(self):
-        """Cleanup when backend is destroyed"""
-        self.cleanup()
+    # ---- lifecycle -------------------------------------------------------------------
 
     def set_verbose(self, verbose: bool):
-        """Enable or disable verbose logging"""
         self._verbose = verbose
-        print(
-            f"[Backend] Verbose logging {'enabled' if verbose else 'disabled'} for table '{self._table_name}'"
-        )
+        print(f"[Backend] verbose {'on' if verbose else 'off'} for '{self._table_name}'")
+
+    def stop(self):
+        """Stop the poll thread (tables stop ticking; their rows stay readable)."""
+        self._stop.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        self._thread = None
+        with self._lock:
+            self._subscribers.clear()
 
     def cleanup(self):
-        """Stop all active threads for this backend"""
-        threads_to_stop = []
-        with self._lock:
-            if self._active_threads:
-                print(f"[Backend] Cleaning up {len(self._active_threads)} active threads...")
-                for table_name, (stop_event, thread) in list(self._active_threads.items()):
-                    stop_event.set()
-                    threads_to_stop.append((table_name, thread))
-                    print(f"[Backend] Signaled thread for '{table_name}' to stop")
-                self._active_threads.clear()
-
-        # Wait for threads to stop (outside lock to avoid deadlock)
-        for table_name, thread in threads_to_stop:
-            thread.join(timeout=2.0)
-            if thread.is_alive():
-                print(f"[Backend] Warning: Thread for '{table_name}' didn't stop within 2 seconds")
-            else:
-                print(f"[Backend] Thread for '{table_name}' stopped cleanly")
-
-        # Unregister this instance from GLOBAL registry
-        if self._table_name:
-            with _GLOBAL_BACKEND_LOCK:
-                if self._table_name in _GLOBAL_BACKENDS_BY_TABLE:
-                    del _GLOBAL_BACKENDS_BY_TABLE[self._table_name]
-                    print(f"[Backend] Unregistered backend for table '{self._table_name}'")
+        self.stop()
+        with _GLOBAL_BACKEND_LOCK:
+            if _GLOBAL_BACKENDS_BY_TABLE.get(self._table_name) is self:
+                del _GLOBAL_BACKENDS_BY_TABLE[self._table_name]
 
     @classmethod
-    def get_or_create(
-        cls,
-        table_name: str,
-        order_by_col: str = DEFAULT_ORDER_BY_COL,
-        verbose: bool = False,
-        transport: str = "pg",
-    ):
-        """Get existing backend for table or create new one (singleton pattern)"""
+    def get_or_create(cls, table_name: str, **kwargs):
+        """The table's backend, created on first use. Re-running a notebook reuses it, so
+        its positions (start, watermark history) stay valid for tables created earlier."""
         with _GLOBAL_BACKEND_LOCK:
-            if table_name in _GLOBAL_BACKENDS_BY_TABLE:
-                existing = _GLOBAL_BACKENDS_BY_TABLE[table_name]
-                if existing._transport != transport:
-                    print(
-                        f"[Backend] WARNING: reusing '{table_name}' backend with transport="
-                        f"{existing._transport!r} (requested {transport!r}); call "
-                        f"stop_monitoring() first to switch"
-                    )
-                print(
-                    f"[Backend] Reusing existing backend for table '{table_name}' (id={id(existing)})"
-                )
+            existing = _GLOBAL_BACKENDS_BY_TABLE.get(table_name)
+            if existing is not None:
+                for name, value in kwargs.items():
+                    current = getattr(existing, "_" + name, getattr(existing, name, value))
+                    if value is not None and current != value:
+                        print(
+                            f"[Backend] reusing '{table_name}' backend with {name}={current!r} "
+                            f"(requested {value!r}); call stop_monitoring() first to change it"
+                        )
                 return existing
-            else:
-                print(f"[Backend] Creating new backend for table '{table_name}'...")
-                new_backend = cls(
-                    order_by_col=order_by_col,
-                    table_name=table_name,
-                    verbose=verbose,
-                    transport=transport,
-                )
-                _GLOBAL_BACKENDS_BY_TABLE[table_name] = new_backend
-                return new_backend
+            backend = cls(table_name=table_name, **kwargs)
+            _GLOBAL_BACKENDS_BY_TABLE[table_name] = backend
+            return backend
 
     @classmethod
     def cleanup_all(cls):
-        """Stop all threads across all backend instances"""
-        backends_to_cleanup = []
         with _GLOBAL_BACKEND_LOCK:
-            if _GLOBAL_BACKENDS_BY_TABLE:
-                print(
-                    f"[Backend] Cleaning up all backends ({len(_GLOBAL_BACKENDS_BY_TABLE)} tables)..."
-                )
-                # Stop threads first (outside the lock in cleanup())
-                backends_to_cleanup = list(_GLOBAL_BACKENDS_BY_TABLE.values())
-                _GLOBAL_BACKENDS_BY_TABLE.clear()  # Clear registry immediately
+            backends = list(_GLOBAL_BACKENDS_BY_TABLE.values())
+        for backend in backends:
+            backend.cleanup()
+        print(f"[Backend] stopped {len(backends)} backend(s)")
 
-        # Now cleanup outside the lock
-        for instance in backends_to_cleanup:
-            # Stop threads but don't try to unregister (already cleared)
-            with instance._lock:
-                if instance._active_threads:
-                    print(
-                        f"[Backend] Cleaning up {len(instance._active_threads)} active threads for '{instance._table_name}'..."
-                    )
-                    threads_to_stop = []
-                    for table_name, (stop_event, thread) in list(instance._active_threads.items()):
-                        stop_event.set()
-                        threads_to_stop.append((table_name, thread))
-                        print(f"[Backend] Signaled thread for '{table_name}' to stop")
-                    instance._active_threads.clear()
+    # ---- metadata and the settled prefix ---------------------------------------------
 
-                    # Wait for threads outside lock
-                    for table_name, thread in threads_to_stop:
-                        thread.join(timeout=2.0)
-                        if thread.is_alive():
-                            print(
-                                f"[Backend] Warning: Thread for '{table_name}' didn't stop within 2 seconds"
-                            )
-                        else:
-                            print(f"[Backend] Thread for '{table_name}' stopped cleanly")
+    def _schema_for(self):
+        if self._schema is None:
+            self._schema = self._source.schema(self._table_name)
+        return self._schema
 
-        if not _GLOBAL_BACKENDS_BY_TABLE:
-            print("[Backend] All backends cleaned up successfully")
+    def _ensure_prefix(self):
+        with self._lock:
+            if self.prefix is None:
+                self._init_prefix()
+            return self.prefix
 
-    # -------------------------------------------------------------------------
-    #  Schema
-    # -------------------------------------------------------------------------
+    def _init_prefix(self):
+        t, ts = self._table_name, self._order_by_col
+        cols = self._source.rows(f"SELECT \"column\", type, upsertKey FROM table_columns('{t}')")
+        types = {c: typ for c, typ, _ in cols}
+        unit = "ns" if types.get(ts) == "TIMESTAMP_NS" else "us"
+        self._cast = "timestamp_ns" if unit == "ns" else "timestamp"
+        arrays = [c for c, typ, _ in cols if "[]" in typ]
+        upsert = [c for c, _, key in cols if key]
+        self._order = qdb_prefix.order_by([c for c, _, _ in cols], upsert, ts, arrays)
+        # array columns sort by their text, computed in ORDER BY only (never transferred)
+        self._order_sql = ", ".join(
+            f"cast({c} as varchar)" if c in arrays else c for c in self._order
+        )
+        schema = self._schema_for()
+        self._select_sql = ", ".join(schema.names) + f", cast({ts} as long) __ticks"
 
-    def _get_schema_from_information_schema(self, table_name: str) -> pa.Schema:
-        """
-        Introspect QuestDB using information_schema.columns and build a PyArrow schema.
-        We exclude the hidden _rowid from the public schema but still use it internally.
-        With transport="qwp" the exact Arrow schema comes from a zero-row query instead.
-        """
-        if self._qwp is not None:
-            return self._qwp.schema(table_name)
+        ttl = self._source.rows(f"SELECT ttlValue, ttlUnit FROM tables() WHERE table_name = '{t}'")
+        if self.history_seconds is None:
+            oldest = self._source.rows(f"SELECT cast(min({ts}) as long) FROM {t}")[0][0]
+            start = (
+                oldest if oldest is not None else time.time_ns() // (1 if unit == "ns" else 1000)
+            )
+        else:
+            tps = qdb_prefix.TICKS_PER_SECOND[unit]
+            start = (time.time_ns() * tps // 1_000_000_000) - int(self.history_seconds * tps)
 
-        q = """
-        SELECT column_name, data_type
-        FROM information_schema.columns
-        WHERE table_name = %s
-        ORDER BY ordinal_position
-        """
-        engine = qdb.get_engine()
-        with engine.connect() as conn:
-            with conn.connection.cursor() as cur:
-                cur.execute(q, (table_name,))
-                rows = cur.fetchall()
+        self.prefix = qdb_prefix.StablePrefix(
+            count=self._count,
+            max_ts=self._max_ts,
+            buckets=self._buckets,
+            start=start,
+            settle_seconds=self.settle_seconds,
+            unit=unit,
+            log=lambda msg: print(f"[Backend:{t}] {msg}"),
+        )
+        size = self.prefix.initialize()
+        print(
+            f"[Backend:{t}] {size:,} settled rows, order by {', '.join(self._order)}"
+            + (
+                f"; TTL {ttl[0][0]} {ttl[0][1]}: rows older than that turn into null rows on re-read"
+                if ttl and ttl[0][0]
+                else ""
+            )
+        )
 
-        if not rows:
-            raise RuntimeError(f"Table {table_name!r} not found or no columns")
+    def _lit(self, ticks):
+        return f"cast({int(ticks)} as {self._cast})"
 
-        fields = []
-        for name, dtype in rows:
-            # you can optionally skip the hidden _rowid if it appears
-            if name.lower() == "_rowid":
-                continue
+    def _range(self, lo, hi):
+        ts = self._order_by_col
+        return f"{ts} >= {self._lit(lo)} AND {ts} < {self._lit(hi)}"
 
-            t = (dtype or "").upper()
-            if t in ("TIMESTAMP", "TIMESTAMPTZ", "TIMESTAMP WITHOUT TIME ZONE"):
-                arrow_type = pa.timestamp("us", tz="UTC")
-            elif t in ("DOUBLE", "DOUBLE PRECISION"):
-                arrow_type = pa.float64()
-            elif t in ("FLOAT", "REAL"):
-                arrow_type = pa.float32()
-            elif t in ("INT", "INTEGER"):
-                arrow_type = pa.int32()
-            elif t in ("LONG", "BIGINT"):
-                arrow_type = pa.int64()
-            elif t in ("SHORT", "SMALLINT"):
-                arrow_type = pa.int16()
-            elif t in ("BYTE", "TINYINT"):
-                arrow_type = pa.int8()
-            elif t in ("BOOLEAN", "BOOL"):
-                arrow_type = pa.bool_()
-            elif t in ("STRING", "SYMBOL", "TEXT", "VARCHAR", "CHAR"):
-                arrow_type = pa.string()
-            else:
-                arrow_type = pa.string()
+    def _count(self, lo, hi):
+        return int(
+            self._source.rows(
+                f"SELECT count() FROM {self._table_name} WHERE {self._range(lo, hi)}"
+            )[0][0]
+        )
 
-            fields.append(pa.field(name, arrow_type))
+    def _max_ts(self):
+        return self._source.rows(
+            f"SELECT cast(max({self._order_by_col}) as long) FROM {self._table_name}"
+        )[0][0]
 
-        return pa.schema(fields)
+    def _buckets(self, lo, hi):
+        ts = self._order_by_col
+        return self._source.rows(
+            f"SELECT cast({ts} as long), n FROM (SELECT {ts}, count() n FROM {self._table_name} "
+            f"WHERE {self._range(lo, hi)} SAMPLE BY 1s) ORDER BY 1"
+        )
+
+    # ---- TableDataServiceBackend: schema and location ---------------------------------
 
     def table_schema(self, table_key, schema_cb, failure_cb):
         try:
-            assert isinstance(table_key, QuestDBTableKey)
-            table_name = table_key.table_name
-            schema = self._get_schema_from_information_schema(table_name)
-            schema_cb(schema, None)  # no partition schema
+            schema_cb(self._schema_for(), None)
         except Exception as e:
             failure_cb(e)
-
-    # -------------------------------------------------------------------------
-    #  Location(s): single location
-    # -------------------------------------------------------------------------
 
     def table_locations(self, table_key, location_cb, success_cb, failure_cb):
         try:
@@ -338,370 +362,95 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
             failure_cb(e)
 
     def subscribe_to_table_locations(self, table_key, location_cb, success_cb, failure_cb):
-        """
-        For refreshing tables, this should notify about new locations.
-        Even with a single location, we might need to re-notify when data changes.
+        self.table_locations(table_key, location_cb, success_cb, failure_cb)
+        return lambda: None
 
-        NOTE: Investigating if this is why column_values isn't being called!
-        """
-        try:
-            # Send initial location
-            location_cb(SINGLE_LOCATION_KEY, None)
-            success_cb()
-
-            if self._verbose:
-                print(f"[Backend] subscribe_to_table_locations called for '{table_key.table_name}'")
-
-            def unsubscribe():
-                if self._verbose:
-                    print("[Backend] Unsubscribed from table locations")
-                return
-
-            return unsubscribe
-        except Exception as e:
-            failure_cb(e)
-
-            def noop():
-                return
-
-            return noop
-
-    # -------------------------------------------------------------------------
-    #  Size tracking: WAL-driven, rowid-based
-    # -------------------------------------------------------------------------
-
-    def _get_table_size(self, table_name: str):
-        """
-        Get current row count for this table using WAL transactions.
-        This is more efficient than count(*) for WAL-enabled tables.
-        With transport="qwp" this is a plain count(): SUM(rowCount) over wal_transactions
-        over-counts once TTL has dropped partitions.
-        """
-        if self._qwp is not None:
-            return self._qwp.row_count(table_name)
-
-        engine = qdb.get_engine()
-        with engine.connect() as conn:
-            with conn.connection.cursor() as cur:
-                # Try to use wal_transactions() for WAL-enabled tables
-                try:
-                    cur.execute(f"""
-                        SELECT SUM(rowCount) 
-                        FROM wal_transactions('{table_name}')
-                    """)
-                    result = cur.fetchone()
-                    if result and result[0] is not None:
-                        return int(result[0])
-                except Exception:
-                    # Fall back to count(*) if wal_transactions() not available
-                    pass
-
-                # Fallback to count(*)
-                cur.execute(f"SELECT count(*) FROM {table_name}")
-                (count,) = cur.fetchone()
-                return int(count or 0)
-
-    def _wal_watch_loop(self, table_key, size_cb, success_cb, failure_cb, stop_event):
-        """
-        Background loop using wal_transactions() for efficient change detection.
-
-        This uses QuestDB's wal_transactions() function which tracks:
-        - sequencerTxn: Transaction ID
-        - minTimestamp/maxTimestamp: Range of data in transaction
-        - rowCount: Number of rows in transaction
-        - structureVersion: Schema version
-
-        This is more efficient than count(*) polling as it only queries metadata.
-        """
-        try:
-            assert isinstance(table_key, QuestDBTableKey)
-            table_name = table_key.table_name
-
-            if self._qwp is not None:
-                self._wal_watch_loop_qwp(table_name, size_cb, success_cb, stop_event)
-                return
-
-            # Initial: get table size and latest transaction
-            last_size = 0
-            last_txn_id = 0
-            use_wal_tracking = False
-
-            engine = qdb.get_engine()
-            with engine.connect() as conn:
-                with conn.connection.cursor() as cur:
-                    # Try to use wal_transactions() for WAL-enabled tables
-                    try:
-                        # Get latest transaction ID and rowCount sum
-                        cur.execute(f"""
-                            SELECT sequencerTxn, SUM(rowCount) OVER ()
-                            FROM wal_transactions('{table_name}')
-                            ORDER BY sequencerTxn DESC
-                            LIMIT 1
-                        """)
-                        result = cur.fetchone()
-                        if result:
-                            last_txn_id = result[0]
-                            wal_row_sum = result[1]
-
-                            # Use rowCount sum if available, otherwise get actual count
-                            if wal_row_sum is not None and wal_row_sum > 0:
-                                last_size = int(wal_row_sum)
-                                print(
-                                    f"[WAL Backend:{table_name}] Using wal_transactions() with rowCount"
-                                )
-                            else:
-                                # rowCount is NULL - we MUST get actual table size for viewport calculations
-                                # But we'll still use txn IDs to detect changes
-                                cur.execute(f"SELECT count(*) FROM {table_name}")
-                                last_size = int(cur.fetchone()[0])
-                                print(
-                                    f"[WAL Backend:{table_name}] rowCount NULL, got actual size via count(*): {last_size:,} rows"
-                                )
-
-                            use_wal_tracking = True
-                    except Exception as e:
-                        # Fall back to count(*) if wal_transactions() not available
-                        print(
-                            f"[WAL Backend:{table_name}] wal_transactions() not available, using count(*) polling: {e}"
-                        )
-                        last_size = self._get_table_size(table_name)
-
-            size_cb(last_size)
-            success_cb()
-
-            print(
-                f"[WAL Backend:{table_name}] Starting monitoring, initial size: {last_size:,}, txn: {last_txn_id}"
-            )
-
-            while not stop_event.is_set():
-                time.sleep(WAL_IDLE_SLEEP_SEC)
-
-                if use_wal_tracking:
-                    # Efficient WAL transaction tracking - no count(*) needed!
-                    engine = qdb.get_engine()
-                    with engine.connect() as conn:
-                        with conn.connection.cursor() as cur:
-                            cur.execute(f"""
-                                SELECT sequencerTxn, rowCount, minTimestamp, maxTimestamp
-                                FROM wal_transactions('{table_name}')
-                                WHERE sequencerTxn > {last_txn_id}
-                                ORDER BY sequencerTxn
-                            """)
-                            new_transactions = cur.fetchall()
-
-                            if new_transactions:
-                                # Update to latest transaction
-                                last_txn_id = new_transactions[-1][0]
-
-                                # Check if rowCount is available
-                                row_counts = [
-                                    txn[1] for txn in new_transactions if txn[1] is not None
-                                ]
-
-                                if row_counts:
-                                    # Sum up new rows from WAL
-                                    new_rows = sum(row_counts)
-                                    current_size = last_size + new_rows
-
-                                    if self._verbose:
-                                        print(
-                                            f"[WAL Backend:{table_name}] New transactions: {len(new_transactions)}, "
-                                            f"size: {last_size:,} -> {current_size:,} (+{new_rows:,}), "
-                                            f"txn: {last_txn_id}"
-                                        )
-                                else:
-                                    # rowCount NULL - we detected a change via txn ID, now get actual new size
-                                    # This is still efficient - we only query when we KNOW data changed
-                                    cur.execute(f"SELECT count(*) FROM {table_name}")
-                                    current_size = int(cur.fetchone()[0])
-
-                                    if self._verbose:
-                                        print(
-                                            f"[WAL Backend:{table_name}] New transactions: {len(new_transactions)}, "
-                                            f"size: {last_size:,} -> {current_size:,} (+{current_size - last_size}), "
-                                            f"txn: {last_txn_id}"
-                                        )
-
-                                last_size = current_size
-
-                                # Call size_cb to notify Deephaven
-                                if self._verbose:
-                                    import datetime
-
-                                    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                                    print(
-                                        f"[WAL Backend:{table_name}] [{ts}] Calling size_cb({current_size})"
-                                    )
-
-                                size_cb(current_size)
-
-                                if self._verbose:
-                                    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                                    print(f"[WAL Backend:{table_name}] [{ts}] size_cb returned")
-                else:
-                    # Fallback to count(*) polling
-                    current_size = self._get_table_size(table_name)
-                    if current_size > last_size:
-                        print(
-                            f"[WAL Backend:{table_name}] Size changed: {last_size:,} -> {current_size:,} (+{current_size - last_size})"
-                        )
-                        last_size = current_size
-                        size_cb(current_size)
-
-        except Exception as e:
-            failure_cb(e)
-
-    def _wal_watch_loop_qwp(self, table_name, size_cb, success_cb, stop_event):
-        """
-        Change detection over QWP. QWP has no subscribe/tail API, so this still polls, but a
-        count() round trip costs ~0.4 ms. Polling the applied row count directly (rather than
-        waiting for a new WAL transaction id) means rows are announced as soon as QuestDB has
-        applied them: a transaction id moves before its rows are visible, and the next id may
-        be seconds away on a sparse symbol.
-        """
-        last_size = self._qwp.row_count(table_name)
-        size_cb(last_size)
-        success_cb()
-        print(f"[QWP Backend:{table_name}] Starting monitoring, initial size: {last_size:,}")
-
-        while not stop_event.is_set():
-            time.sleep(WAL_IDLE_SLEEP_SEC)
-            size = self._qwp.row_count(table_name)
-            if size > last_size:
-                if self._verbose:
-                    print(
-                        f"[QWP Backend:{table_name}] size {last_size:,} -> {size:,} "
-                        f"(+{size - last_size:,})"
-                    )
-                last_size = size
-                size_cb(size)
+    # ---- size -----------------------------------------------------------------------------
 
     def table_location_size(self, table_key, table_location_key, size_cb, failure_cb):
-        """
-        Static size (non-refreshing use).
-        """
+        """Static size, and Deephaven's refresh(): always the published prefix size."""
         try:
-            assert isinstance(table_key, QuestDBTableKey)
-            table_name = table_key.table_name
-            size = self._get_table_size(table_name)
-            size_cb(size)
+            size_cb(self._ensure_prefix().size)
         except Exception as e:
             failure_cb(e)
 
     def subscribe_to_table_location_size(
         self, table_key, table_location_key, size_cb, success_cb, failure_cb
     ):
-        """
-        Refreshing size – WAL-driven, not interval count(*) polling.
-        """
-        table_name = table_key.table_name
-
-        # Check if we already have a thread for this table (with lock)
-        old_thread = None
+        try:
+            prefix = self._ensure_prefix()
+            size_cb(prefix.size)
+            success_cb()
+        except Exception as e:
+            failure_cb(e)
+            return lambda: None
+        token = object()
         with self._lock:
-            if table_name in self._active_threads:
-                print(
-                    f"[WAL Backend] Thread already exists for '{table_name}', stopping old one..."
+            self._subscribers[token] = size_cb
+            if self._thread is None or not self._thread.is_alive():
+                self._stop = threading.Event()
+                self._thread = threading.Thread(
+                    target=self._poll_loop,
+                    args=(self._stop,),
+                    daemon=True,
+                    name=f"QuestDB-Monitor-{self._table_name}",
                 )
-                old_stop, old_thread = self._active_threads[table_name]
-                old_stop.set()
-
-        # Wait for old thread to stop (outside lock to avoid deadlock)
-        if old_thread:
-            old_thread.join(timeout=1.0)
-            if old_thread.is_alive():
-                print(f"[WAL Backend] Warning: Old thread for '{table_name}' didn't stop cleanly")
-
-        # Create and start new thread
-        stop_event = threading.Event()
-
-        t = threading.Thread(
-            target=self._wal_watch_loop,
-            args=(table_key, size_cb, success_cb, failure_cb, stop_event),
-            daemon=True,
-            name=f"QuestDB-Monitor-{table_name}-{id(self)}",
-        )
-        t.start()
-
-        # Track this thread (with lock)
-        with self._lock:
-            self._active_threads[table_name] = (stop_event, t)
-
-        print(
-            f"[WAL Backend] Started new monitoring thread for '{table_name}' (backend id={id(self)})"
-        )
+                self._thread.start()
 
         def unsubscribe():
-            print(f"[WAL Backend] Unsubscribe called for '{table_name}'")
             with self._lock:
-                stop_event.set()
-                if table_name in self._active_threads:
-                    del self._active_threads[table_name]
+                self._subscribers.pop(token, None)
 
         return unsubscribe
 
-    # -------------------------------------------------------------------------
-    #  Column paging: use rowid ranges
-    # -------------------------------------------------------------------------
-
-    def _load_page_pg(self, table_name, offset, max_rows):
-        """All columns of rows [offset, offset+max_rows) in one Postgres-wire query."""
-        import datetime
-
-        schema = self._get_schema_from_information_schema(table_name)
-        names = list(schema.names)
-        col_list = ", ".join(names)
-        # Use ROW_NUMBER() since QuestDB's Postgres wire does not support OFFSET
-        sql = f"""
-            WITH numbered AS (
-                SELECT {col_list}, ROW_NUMBER() OVER (ORDER BY {self._order_by_col}) AS rn
-                FROM {table_name}
-            )
-            SELECT {col_list}
-            FROM numbered
-            WHERE rn > %s AND rn <= %s
-        """
-        engine = qdb.get_engine()
-        with engine.connect() as conn:
-            with conn.connection.cursor() as cur:
-                started = time.perf_counter()
-                # QuestDB ROW_NUMBER() is 1-based; Deephaven's offset is 0-based
-                cur.execute(sql, (offset, offset + max_rows))
-                rows = cur.fetchall()
+    def _poll_loop(self, stop):
+        t = self._table_name
+        print(f"[Backend:{t}] monitoring, size {self.prefix.size:,}")
+        while not stop.is_set():
+            time.sleep(POLL_SECONDS)
+            try:
+                with self._lock:
+                    size = self.prefix.poll()
+                    callbacks = list(self._subscribers.values())
+                if size is None:
+                    continue
                 if self._verbose:
-                    print(
-                        f"[Backend:{table_name}] page query {(time.perf_counter() - started) * 1000:.1f}ms, "
-                        f"{len(rows)} rows, {len(names)} columns"
-                    )
+                    print(f"[Backend:{t}] size {size:,} watermark {self.prefix.watermark}")
+                for cb in callbacks:
+                    cb(size)
+            except Exception as e:  # keep ticking through transient QuestDB errors
+                print(f"[Backend:{t}] poll failed: {type(e).__name__}: {e}")
+                stop.wait(2.0)
 
-        arrays = {}
-        for position, name in enumerate(names):
-            values = [r[position] for r in rows]
-            field_type = schema.field(name).type
-            if pa.types.is_timestamp(field_type):
-                values = [
-                    v.replace(tzinfo=datetime.timezone.utc)
-                    if v and isinstance(v, datetime.datetime) and v.tzinfo is None
-                    else v
-                    for v in values
-                ]
-            elif pa.types.is_floating(field_type):
-                values = [float(v) if v is not None else None for v in values]
-            elif pa.types.is_string(field_type):
-                values = [str(v) if v is not None else None for v in values]
-            arrays[name] = pa.array(values, type=field_type)
-        return pa.table(arrays)
+    # ---- column values ---------------------------------------------------------------
 
-    def _get_page(self, table_name, offset, min_rows, max_rows):
-        """One consistent snapshot of every column for a page (see qdb_pagecache)."""
-
-        def load():
-            if self._qwp is not None:
-                # Columnar Arrow page straight from QuestDB: no row loop, no ROW_NUMBER() scan
-                return self._qwp.page_all(table_name, offset, max_rows, self._order_by_col)
-            return self._load_page_pg(table_name, offset, max_rows)
-
-        return self._pages.get((table_name, offset, max_rows), min_rows, load)
+    def _load_page(self, offset, max_rows):
+        """Positions [offset, min(offset + max_rows, size)) of every column, one query."""
+        with self._lock:
+            prefix = self.prefix
+            hi = min(offset + max_rows, prefix.size)
+            base, bounds, counts = prefix.locate(offset, hi)
+        started = time.perf_counter()
+        schema = self._schema_for()
+        sql = (
+            f"SELECT {self._select_sql} FROM {self._table_name} "
+            f"WHERE {self._range(bounds[0], bounds[-1])} ORDER BY {self._order_sql}"
+        )
+        fetched = self._source.table(sql, schema.append(pa.field("__ticks", pa.int64())))
+        ticks = fetched.column("__ticks").to_pylist()
+        idx, extra, missing = qdb_prefix.take_indices(ticks, bounds, counts)
+        page = fetched.select(schema.names).take(pa.array(idx, pa.int64()))
+        page = page.slice(offset - base, hi - offset)
+        if missing:
+            self.null_rows_served += sum(1 for i in idx[offset - base : hi - base] if i is None)
+        if self._verbose or missing or extra:
+            print(
+                f"[Backend:{self._table_name}] page {offset:,}+{hi - offset:,}: fetched "
+                f"{fetched.num_rows:,} rows in {(time.perf_counter() - started) * 1000:.1f} ms"
+                + (f", {extra} late row(s) left out" if extra else "")
+                + (f", {missing} vanished row(s) served as nulls" if missing else "")
+            )
+        return page.cast(schema)
 
     def column_values(
         self,
@@ -714,33 +463,18 @@ class QuestDBBackend(TableDataServiceBackend, ABC):
         values_cb,
         failure_cb,
     ):
-        """
-        Provide a single-column pyarrow.Table with rows [offset, offset+N).
-
-        Deephaven asks for each column separately. They are all served from one page
-        loaded with a single query: separate queries per column let rows that arrive out of
-        timestamp order shift the window between them, mixing columns of different rows.
-        """
+        """Deephaven asks per column; all columns of a page come from one cached query."""
         try:
-            assert isinstance(table_key, QuestDBTableKey)
-            table_name = table_key.table_name
-            if self._verbose:
-                print(
-                    f"[Backend:{table_name}] column_values: col={col}, offset={offset}, "
-                    f"min_rows={min_rows}, max_rows={max_rows}"
-                )
-            page = self._get_page(table_name, offset, min_rows, max_rows)
+            page = self._pages.get(
+                (offset, max_rows), min_rows, lambda: self._load_page(offset, max_rows)
+            )
             values_cb(pa.table({col: page.column(col)}))
         except Exception as e:
             failure_cb(e)
 
 
 # =============================================================================
-#  Convenience Functions
-# =============================================================================
-
-# =============================================================================
-#  Convenience Functions
+#  Convenience functions
 # =============================================================================
 
 
@@ -751,80 +485,62 @@ def create_live_table(
     refreshing: bool = True,
     verbose: bool = False,
     use_liveness_scope: bool = True,
-    transport: str = "pg",
+    transport: str = DEFAULT_TRANSPORT,
+    settle_seconds: float = DEFAULT_SETTLE_SECONDS,
+    history_seconds: float = None,
 ):
-    """
-    Create a live Deephaven table backed by QuestDB.
+    """A Deephaven table backed by a QuestDB table through TableDataService.
+
+    Rows appear once settled: `settle_seconds` after their timestamp (default 3 s), so every
+    row is exact and positions never move (module docstring). Row order is by timestamp;
+    sort explicitly for display.
 
     Args:
-        table_name: Name of the QuestDB table
-        order_by_col: Column to order by (default: "timestamp")
-        page_size: Page size for Deephaven (default: 64,000)
-        refreshing: Whether to enable live updates (default: True)
-        verbose: Enable verbose logging of transaction updates (default: False)
-        use_liveness_scope: Whether to wrap table creation in LivenessScope (default: True)
-        transport: "pg" (Postgres wire, default) or "qwp" (QuestDB WebSocket protocol:
-            Arrow pages via LIMIT lo,hi; see qdb_qwp.py)
+        table_name: QuestDB table (must have a designated timestamp `order_by_col`)
+        page_size: rows per Deephaven page (default 64,000)
+        refreshing: tick as new rows settle (default True)
+        verbose: log every size change and page load
+        transport: "qwp" (default; Arrow over QuestDB's WebSocket protocol, DOUBLE[][] as
+            double[][]) or "pg" (Postgres wire; arrays as strings, microsecond timestamps)
+        settle_seconds: how far behind min(max(timestamp), now) the watermark trails
+        history_seconds: rows older than this at creation are not included (None: the whole
+            table). A table with a TTL loses old rows; see the module docstring.
 
-    Returns:
-        Deephaven table object
-
-    Example:
-        trades = create_live_table('trades')
-        trades = create_live_table('trades', verbose=True)  # With detailed logs
-        trades = create_live_table('trades', use_liveness_scope=False)  # No scope management
+    The backend is shared per table (re-running a notebook reuses it); `get_backend(name)`
+    exposes its counters: prefix.size, prefix.watermark, prefix.late_rows, prefix.missing_rows.
     """
     backend = QuestDBBackend.get_or_create(
-        table_name=table_name, order_by_col=order_by_col, verbose=verbose, transport=transport
+        table_name,
+        order_by_col=order_by_col,
+        verbose=verbose,
+        transport=transport,
+        settle_seconds=settle_seconds,
+        history_seconds=history_seconds,
     )
-
     tds = TableDataService(backend=backend, page_size=page_size)
     table_key = QuestDBTableKey(table_name)
-
     if use_liveness_scope:
-        # Create table within LivenessScope for proper lifecycle management
         scope = LivenessScope()
         with scope.open():
-            t = tds.make_table(table_key, refreshing=refreshing)
-        return t
-    else:
-        # Create table without LivenessScope (for backward compatibility)
-        return tds.make_table(table_key, refreshing=refreshing)
+            return tds.make_table(table_key, refreshing=refreshing)
+    return tds.make_table(table_key, refreshing=refreshing)
+
+
+def get_backend(table_name: str):
+    with _GLOBAL_BACKEND_LOCK:
+        return _GLOBAL_BACKENDS_BY_TABLE.get(table_name)
 
 
 def set_verbose(table_name: str, verbose: bool):
-    """
-    Enable or disable verbose logging for a specific table's backend.
-
-    Args:
-        table_name: Name of the table
-        verbose: True to enable verbose logging, False to disable
-
-    Example:
-        set_verbose('trades', True)   # Enable verbose logging
-        set_verbose('trades', False)  # Disable verbose logging
-    """
-    with _GLOBAL_BACKEND_LOCK:
-        if table_name in _GLOBAL_BACKENDS_BY_TABLE:
-            backend = _GLOBAL_BACKENDS_BY_TABLE[table_name]
-            backend.set_verbose(verbose)
-        else:
-            print(f"[Backend] No backend found for table '{table_name}'")
+    """Enable or disable verbose logging for one table's backend."""
+    backend = get_backend(table_name)
+    if backend is None:
+        print(f"[Backend] No backend found for table '{table_name}'")
+    else:
+        backend.set_verbose(verbose)
 
 
 def stop_monitoring():
-    """
-    Stop all QuestDB monitoring threads.
-
-    This will cleanly stop all background threads that are monitoring
-    QuestDB tables for changes. After calling this, logs will stop ticking.
-
-    To restart monitoring, simply create a new table with create_live_table()
-    or re-run your script.
-
-    Example:
-        stop_monitoring()
-    """
+    """Stop all QuestDB monitoring threads; tables stop ticking. Re-run create_live_table()
+    (a fresh backend) to start again."""
     QuestDBBackend.cleanup_all()
-    print("✅ All monitoring stopped! Logs will stop ticking.")
-    print("   Run create_live_table() again to restart monitoring.")

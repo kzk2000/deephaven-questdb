@@ -7,13 +7,11 @@ import threading
 from pathlib import Path
 
 import pyarrow as pa
-import pytest
 
 notebooks = Path(__file__).parent.parent.parent.parent.parent / "data" / "deephaven" / "notebooks"
 sys.path.insert(0, str(notebooks))
 
 from qdb_pagecache import PageCache  # noqa: E402
-from qdb_qwp import QwpReader  # noqa: E402
 
 
 def _page(n, tag=0):
@@ -96,21 +94,3 @@ def test_different_pages_are_independent():
     a = cache.get(("t", 0, 10), 1, lambda: _page(3, tag=1))
     b = cache.get(("t", 10, 10), 1, lambda: _page(3, tag=2))
     assert a.column("price")[0].as_py() == 1.0 and b.column("price")[0].as_py() == 2.0
-
-
-def test_qwp_page_all_is_a_single_select_star_with_limit():
-    queries = []
-    reader = QwpReader()
-    reader.arrow = lambda sql: queries.append(sql) or pa.table({"x": [1]})
-    page = reader.page_all("trades", 64000, 64000, "timestamp")
-    assert queries == ["SELECT * FROM trades ORDER BY timestamp LIMIT 64000,128000"]
-    assert page.num_rows == 1
-
-
-@pytest.mark.parametrize("offset,count", [(0, 10), (5, 1)])
-def test_qwp_page_all_window_bounds(offset, count):
-    queries = []
-    reader = QwpReader()
-    reader.arrow = lambda sql: queries.append(sql) or pa.table({"x": [1]})
-    reader.page_all("t", offset, count, "ts")
-    assert queries[0].endswith(f"LIMIT {offset},{offset + count}")

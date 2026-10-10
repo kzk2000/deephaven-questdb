@@ -1,15 +1,14 @@
 """
-A tiny page cache that makes column fetches atomic.
+A tiny page cache: one query per page, shared by every column of it.
 
-Deephaven's TableDataService asks the backend for each column of a page separately. If every
-request runs its own query, rows that land out of timestamp order between the queries shift the
-`LIMIT lo,hi` window, and the columns of one logical row come from different rows (price from
-one trade, exchange from another). Instead the backend loads *all* columns for a page in one
-query and serves the individual column requests from that snapshot.
+Deephaven's TableDataService asks the backend for each column of a page separately. The backend
+loads *all* columns of a page in one query and serves the individual column requests from that
+result. Positions themselves are made immutable by qdb_prefix (a settled prefix), so this cache
+is about cost (one query instead of one per column), not correctness; it also means even a row
+whose segment changed (a row later than the settle lag) is never mixed within one page load.
 
 An entry is reused only while it is fresh and holds at least the `min_rows` the caller needs, so
-a tail page that has grown is reloaded, and every column of one request set still sees the same
-snapshot because they share the key.
+a tail page that has grown is reloaded.
 """
 
 import threading

@@ -1,9 +1,8 @@
 """
 QuestDB reads over QWP (QuestDB's WebSocket wire protocol) as pyarrow tables.
 
-Used by qdb_backend.QuestDBBackend when created with transport="qwp". Compared with the
-Postgres-wire path (psycopg2 + ROW_NUMBER() paging), measured on a 1M-row table in the
-Deephaven container:
+Used by qdb_backend (transport="qwp", the default) and qdb_feed. Compared with the
+Postgres-wire path (psycopg2), measured on a 1M-row table in the Deephaven container:
 
     64k-row page   PG + ROW_NUMBER  ~90-120 ms   QWP + LIMIT lo,hi  ~3-6 ms
     schema         information_schema ~2 ms      SELECT ... LIMIT 0  ~0.4 ms
@@ -166,20 +165,6 @@ class QwpReader:
         }
         return with_deephaven_hints(apply_array_dimensions(schema, dims))
 
-    def row_count(self, table: str) -> int:
-        return int(self.arrow(f"SELECT count() AS n FROM {table}").column("n")[0].as_py())
-
     def page_sql(self, sql: str) -> pa.Table:
         """Run arbitrary SQL and return the result normalized for Deephaven."""
-        return normalize(self.arrow(sql), self._flatten_arrays)
-
-    def page_all(self, table: str, offset: int, count: int, order_by: str) -> pa.Table:
-        """Rows [offset, offset+count) of every column in one query: a consistent snapshot."""
-        lo, hi = int(offset), int(offset) + int(count)
-        sql = f"SELECT * FROM {table} ORDER BY {order_by} LIMIT {lo},{hi}"
-        return normalize(self.arrow(sql), self._flatten_arrays)
-
-    def page(self, table: str, column: str, offset: int, count: int, order_by: str) -> pa.Table:
-        """Rows [offset, offset+count) of one column in `order_by` order, normalized."""
-        sql = f"SELECT {column} FROM {table} ORDER BY {order_by} LIMIT {int(offset)},{int(offset) + int(count)}"
         return normalize(self.arrow(sql), self._flatten_arrays)
