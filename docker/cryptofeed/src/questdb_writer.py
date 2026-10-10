@@ -2,28 +2,60 @@
 QuestDB writer using the official py-questdb-client SDK
 
 Unified writer supporting both trades and orderbooks using the official QuestDB Python client.
-All data is sent via ILP protocol which supports arrays natively (requires QuestDB >= 9.0.0).
+Rows are sent one tick at a time; arrays are supported natively (requires QuestDB >= 9.0.0).
+
+Protocols (``protocol`` argument or the QUESTDB_PROTOCOL environment variable):
+    ws / wss   QWP over WebSocket (default). row() only appends to a buffer and a background
+               sender publishes it every ``auto_flush_interval_ms`` (25 ms), so calls never
+               block the asyncio event loop and rows are visible ~15-30 ms after the tick.
+               Measured against ILP/HTTP with defaults: newest-row age 561 ms -> ~20 ms.
+    http       ILP over HTTP. The SDK buffers for 1 s by default; flushing per tick instead
+               blocks the calling thread on an HTTP round trip (and for seconds on an outage).
+    tcp        ILP over TCP.
 
 Usage:
     writer = QuestDBWriter(host='localhost')
-    writer.write_trade(trade_data)           # Uses ILP via SDK
-    writer.write_orderbook(book, timestamp)  # Uses ILP via SDK with numpy arrays
-    writer.execute_sql("SELECT * FROM trades")  # Uses REST API
+    writer.write_trade(trade_data)
+    writer.write_orderbook(book, timestamp)     # numpy 2D arrays
+    writer.execute_sql("SELECT * FROM trades")  # REST API
 """
 
 import json
+import os
 import urllib.parse
 import urllib.request
 
 import numpy as np
+import questdb
 from questdb import Sender, TimestampNanos
+
+
+def _rejection_handler(counter):
+    """Build a QWP error handler that holds only a counter, never the writer.
+
+    A bound method (writer -> connection -> handler -> writer) creates a reference cycle that
+    the SDK's background threads trip over when the interpreter shuts down.
+    """
+
+    def handler(error):
+        counter[0] += 1
+        print(f"QuestDB rejected data: {error}")
+
+    return handler
+
+
+DEFAULT_PROTOCOL = "ws"
+# Short enough for near-real-time rows, long enough that a server outage of several seconds is
+# buffered and replayed instead of back-pressuring row() (see docs: 10 ms stalled ~2.4 s in a
+# 5 s outage, 25 ms did not).
+DEFAULT_AUTO_FLUSH_INTERVAL_MS = 25
 
 
 class QuestDBWriter:
     """
     Unified QuestDB writer using the official SDK
 
-    - ILP protocol via SDK for all data (trades and orderbooks)
+    - QWP (WebSocket) or ILP via the SDK for all data (trades and orderbooks)
     - Supports numpy arrays for orderbook price levels
     - REST API for SQL queries
     """
@@ -32,40 +64,55 @@ class QuestDBWriter:
         self,
         host="127.0.0.1",
         ilp_port=9000,
-        protocol="http",
+        protocol=None,
         verbose=True,
         http_port=9000,
         trades_table="trades",
         orderbooks_table="orderbooks",
+        auto_flush_interval_ms=DEFAULT_AUTO_FLUSH_INTERVAL_MS,
     ):
         """
         Initialize QuestDB writer with official SDK
 
         Args:
             host: QuestDB hostname (default: '127.0.0.1')
-            ilp_port: ILP port - 9000 for HTTP (default), 9009 for TCP
-            protocol: 'http' (recommended) or 'tcp' (default: 'http')
+            ilp_port: ingest port - 9000 for ws/http (default), 9009 for tcp
+            protocol: 'ws' (QWP, default), 'wss', 'http' or 'tcp'. Defaults to the
+                QUESTDB_PROTOCOL environment variable, then 'ws'
+            auto_flush_interval_ms: how long a row may sit in the client buffer (ws only)
             verbose: Print initialization messages (default: True)
             http_port: HTTP port for SQL queries via REST (default: 9000)
             trades_table: Destination table for trades (default: 'trades')
             orderbooks_table: Destination table for orderbooks (default: 'orderbooks')
         """
+        protocol = protocol or os.environ.get("QUESTDB_PROTOCOL") or DEFAULT_PROTOCOL
         self.host = host
         self.ilp_port = ilp_port
         self.protocol = protocol
         self.verbose = verbose
         self.trades_table = trades_table
         self.orderbooks_table = orderbooks_table
+        # rows/frames the server rejected (QWP reports these asynchronously)
+        self._rejections = [0]
+        self._error_handler = _rejection_handler(self._rejections)
 
         # Build configuration string for the SDK
         self.conf = f"{protocol}::addr={host}:{ilp_port};"
+        if protocol in ("ws", "wss"):
+            self.conf += f"auto_flush_interval={int(auto_flush_interval_ms)};"
 
         # HTTP port for SQL queries (REST API)
         self.http_port = http_port
         self.base_url = f"http://{host}:{self.http_port}/exec"
 
         # Create sender and enter context (for persistent connection)
-        self._sender = Sender.from_conf(self.conf)
+        self._db = None
+        if protocol in ("ws", "wss"):
+            # QWP: a pooled connection handle that owns a background sender
+            self._db = questdb.connect(self.conf, error_handler=self._error_handler)
+            self._sender = self._db.sender()
+        else:
+            self._sender = Sender.from_conf(self.conf)
         self._sender.__enter__()
 
         if verbose:
@@ -73,8 +120,14 @@ class QuestDBWriter:
             print(f"  ILP:  {protocol.upper()} {host}:{ilp_port}")
             print(f"  REST: HTTP {host}:{self.http_port} (queries)")
 
+    @property
+    def rejections(self):
+        """Number of server-side rejections seen so far (QWP reports them asynchronously,
+        not as exceptions from row())."""
+        return self._rejections[0]
+
     # =========================================================================
-    # ILP Protocol Methods (for both trades and orderbooks)
+    # Row writers (for both trades and orderbooks)
     # =========================================================================
 
     def write_trade(self, data):
@@ -253,15 +306,26 @@ class QuestDBWriter:
     # Common Methods
     # =========================================================================
 
-    def flush(self):
-        """Flush buffered data"""
+    def flush(self, wait=False):
+        """Publish buffered rows. wait=True (ws only) also blocks until the server has
+        acknowledged them, about 10 ms per call: use it at shutdown or in tests, not per tick."""
         if self._sender:
-            self._sender.flush()
+            if self._db is not None:
+                self._sender.flush(wait=wait)
+            else:
+                self._sender.flush()
 
     def close(self):
-        """Close SDK connection"""
+        """Flush and close the SDK connection (safe to call more than once)"""
         if self._sender:
+            try:
+                self.flush(wait=True)
+            except Exception as e:
+                print(f"Error flushing QuestDB writer on close: {e}")
             self._sender.__exit__(None, None, None)
             self._sender = None
+            if self._db is not None:
+                self._db.close()
+                self._db = None
             if self.verbose:
                 print("QuestDB SDK connection closed")

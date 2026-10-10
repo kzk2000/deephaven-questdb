@@ -38,7 +38,7 @@ def test_writer_initialization():
     assert writer1.host == "localhost"
     assert writer1.ilp_port == 9000  # HTTP ILP shares the REST port
     assert writer1.http_port == 9000
-    assert writer1.protocol == "http"
+    assert writer1.protocol == "ws"  # QWP is the default; http/tcp via argument or QUESTDB_PROTOCOL
     writer1.close()
 
     # Custom ports
@@ -57,7 +57,7 @@ def test_writer_has_ilp_and_rest_support():
     # Check ILP attributes (official SDK sender configured from a conf string)
     assert hasattr(writer, "_sender")
     assert hasattr(writer, "ilp_port")
-    assert writer.conf.startswith("http::addr=")
+    assert writer.conf.startswith("ws::addr=")
 
     # Check REST attributes
     assert hasattr(writer, "base_url")
