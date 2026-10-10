@@ -65,7 +65,7 @@ VENUES = (
         "BINANCE_FUTURES",
         "Binance",
         ("BTC-USDT-PERP", "ETH-USDT-PERP"),  # USDT-M only
-        "region blocked from this host (HTTP 451)",
+        "no data received (REST is region blocked here; the WebSocket feed is down?)",
     ),
     Venue(
         "BYBIT",
@@ -78,7 +78,7 @@ VENUES = (
             "ETH-USDC-PERP",
             "ETH-USD-PERP",
         ),
-        "region blocked from this host (HTTP 403)",
+        "no data received (REST is region blocked here; the WebSocket feed is down?)",
     ),
 )
 
@@ -134,7 +134,7 @@ def family_rows(asset: str, ctype: str) -> list[dict]:
 
 def venue_status(book_age_s, trade_age_s, stale_after_s: float = 15.0) -> str:
     """LIVE when the book (or, without a book, the last trade) is fresh; STALE when data exists
-    but is old; NO DATA when nothing was ever received (e.g. a region-blocked venue)."""
+    but is old; NO DATA when nothing was ever received (e.g. a venue whose feed is down)."""
     ages = [a for a in (book_age_s, trade_age_s) if _is_num(a)]
     if not ages:
         return "NO DATA"

@@ -171,6 +171,8 @@ VENUES: Dict[str, Venue] = {
         "BinanceFutures",
         ("BTC-USDT-PERP", "ETH-USDT-PERP"),  # USDT-M only
         binance_futures_specs,
+        # WebSocket only (REST answers HTTP 451): 20-level partial books, see binance_ws.py
+        feed_factory="binance_ws:binance_feed_class",
     ),
     "hyperliquid": Venue(
         "hyperliquid",

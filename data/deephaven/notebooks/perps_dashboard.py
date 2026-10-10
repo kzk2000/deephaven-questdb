@@ -6,10 +6,9 @@ $10k..$5M, per asset (BTC / ETH) and family:
     inverse = coin-margined -USD-PERP (Deribit, OKX, Bybit)
     linear  = -USDT-PERP and -USDC-PERP, USDT/USDC treated as USD (Deribit and Hyperliquid
               list USDC books, OKX / Binance / Bybit USDT)
-Venues come from perps_dash_lib.VENUES (data, not layout): a venue without data (Binance is
-region blocked from this host) shows as a grey NO DATA row and lights up when rows
+Venues come from perps_dash_lib.VENUES (data, not layout): a venue without data shows as a grey NO DATA row and lights up when rows
 arrive. Coverage matters: a venue's published book reaches only so far from mid (OKX 400
-levels, Hyperliquid 20 plus aggregated books, Bybit 1000), so wider buckets are lower bounds, shown as ">= ..." in amber.
+levels, Hyperliquid 20 plus aggregated books, Bybit 1000, Binance 20), so wider buckets are lower bounds, shown as ">= ..." in amber.
 
 Usage:
     exec(open('/data/storage/notebooks/perps_dashboard.py').read())
