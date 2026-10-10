@@ -282,7 +282,10 @@ def test_liquidity_callback_extends_the_raw_book_with_deep_books(script):
     cols = writer.write_row.call_args.kwargs["columns"]
     assert cols["bid_levels"] == 2 and cols["ask_levels"] == 2
     mid = 83_005.0
-    assert cols["bid_reach_bps"] == pytest.approx((mid - 82_500) / mid * 1e4)
+    # coverage stays what the venue's own (raw) book covers exactly; the deep levels only add
+    # depth beyond it, which the dashboard shows as a lower bound
+    assert cols["bid_reach_bps"] == pytest.approx((mid - 83_000) / mid * 1e4)
+    assert cols["ask_reach_bps"] == pytest.approx((83_010 - mid) / mid * 1e4)
     assert cols["bid_usd_25bp"] == pytest.approx(83_000.0)  # the deep level is ~60 bps out
     assert cols["bid_usd_100bp"] == pytest.approx(83_000.0 + 5 * 82_500.0)
     assert cols["ask_usd_100bp"] == pytest.approx(83_010.0 + 5 * 83_500.0)

@@ -199,7 +199,10 @@ def liquidity_callback(
         try:
             bid_prices, bid_sizes = _side_arrays(book.book.bids)
             ask_prices, ask_sizes = _side_arrays(book.book.asks)
+            raw_reach = None
             if deep_books is not None and len(bid_prices) and len(ask_prices):
+                # what the venue's own book covers exactly, before aggregated levels are added
+                raw_reach = (float(bid_prices.min()), float(ask_prices.max()))
                 bid_prices, bid_sizes, ask_prices, ask_sizes = deep_books.extend(
                     book.symbol, bid_prices, bid_sizes, ask_prices, ask_sizes
                 )
@@ -211,6 +214,13 @@ def liquidity_callback(
             )
             if metrics is None:
                 return
+            if raw_reach is not None:
+                # Aggregated levels (venue nSigFigs books) are coarse: their depth is a lower
+                # bound, so coverage stays the exact raw reach and buckets beyond it are
+                # reported as lower bounds (never as exact)
+                mid = metrics["mid"]
+                metrics["bid_reach_bps"] = (mid - raw_reach[0]) / mid * 1e4
+                metrics["ask_reach_bps"] = (raw_reach[1] - mid) / mid * 1e4
             writer.write_row(
                 table,
                 symbols={
