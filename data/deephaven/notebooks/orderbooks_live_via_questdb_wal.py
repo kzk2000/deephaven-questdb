@@ -1,7 +1,7 @@
-# Live Orderbooks from QuestDB - Real-time Updates via WAL Monitoring
+# Live Orderbooks from QuestDB - TableDataService over QuestDB storage
 #
-# This creates a Deephaven table backed by QuestDB storage with real-time updates
-# by monitoring QuestDB's WAL (Write-Ahead Log) for new rows.
+# This creates a Deephaven table backed by QuestDB storage that ticks as new rows settle
+# (qdb_backend polls QuestDB every 50 ms). bids/asks arrive as double[][] over QWP.
 #
 # REQUIREMENTS:
 # 1. Deephaven 42.6 or newer (TableDataService callbacks fixed upstream)
@@ -20,9 +20,12 @@ from qdb_backend import create_live_table, stop_monitoring
 TARGET_TABLE_NAME = "orderbooks"  # QuestDB table to stream
 ORDER_BY_COL = "timestamp"  # Order column (usually timestamp)
 PAGE_SIZE = 32_000  # Deephaven page size (smaller for orderbooks)
-# "pg": Postgres wire (default); "qwp": Arrow pages over QuestDB's WebSocket protocol, which
-# pages ~20-40x cheaper (see qdb_qwp.py). Set TRANSPORT before running to override.
-TRANSPORT = globals().get("TRANSPORT", "pg")
+# "qwp" (default): Arrow pages over QuestDB's WebSocket protocol (see qdb_qwp.py); "pg":
+# Postgres wire (arrays as strings). Set TRANSPORT before running to override.
+TRANSPORT = globals().get("TRANSPORT", "qwp")
+# Rows appear once settled, SETTLE_SECONDS after their timestamp, so every row is exact and
+# row positions never move (see qdb_backend.py). latency_seconds below shows that delay.
+SETTLE_SECONDS = globals().get("SETTLE_SECONDS", 3.0)
 
 
 # =============================================================================
@@ -35,6 +38,7 @@ orderbooks = create_live_table(
     refreshing=True,
     use_liveness_scope=True,
     transport=TRANSPORT,
+    settle_seconds=SETTLE_SECONDS,
 ).sort_descending(order_by=["timestamp"])
 
 # Add latency calculations
