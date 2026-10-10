@@ -136,7 +136,7 @@ class QuestDBWriter:
 
     def write_trade(self, data):
         """
-        Write trade data to QuestDB using ILP protocol via SDK
+        Write trade data to QuestDB via the SDK sender (QWP by default)
 
         Args:
             data: Trade data dict with keys: exchange, symbol, side, price, size, timestamp, etc.
@@ -159,13 +159,7 @@ class QuestDBWriter:
             timestamp = data.get("timestamp")
             receipt_timestamp = data["receipt_timestamp"]
 
-            # # Convert timestamp to nanoseconds
-            # if timestamp:
-            #     ts_nanos = TimestampNanos(int(timestamp * 1_000_000_000))
-            # else:
-            #     ts_nanos = TimestampNanos(int(receipt_timestamp * 1_000_000_000))
-
-            # In write_trade():
+            # Exchange timestamp, falling back to receipt time (seconds -> nanoseconds)
             if timestamp:
                 ts_nanos = TimestampNanos(int(timestamp * 1_000_000_000))
             else:

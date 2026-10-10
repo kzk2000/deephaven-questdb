@@ -28,7 +28,7 @@ async def write_to_questdb(data, receipt_timestamp):
     # Write to QuestDB
     questdb_writer.write_trade(trade_data)
 
-    # Flush every 100 writes for better throughput
+    # Also publish every 100 writes (the writer already auto-flushes every 25 ms over QWP)
     if not hasattr(write_to_questdb, "counter"):
         write_to_questdb.counter = 0
     write_to_questdb.counter += 1

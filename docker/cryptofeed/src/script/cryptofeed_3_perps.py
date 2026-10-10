@@ -1,5 +1,6 @@
 """
-BTC / ETH perpetual futures (linear and inverse) from Binance, Bybit, Deribit and OKX.
+BTC / ETH perpetual futures (linear and inverse) from Binance, Bybit, Deribit, Hyperliquid
+and OKX.
 
 Trades and L2 books go to the same `trades` / `orderbooks` tables as the spot feeds.
 `exchange` is BINANCE_FUTURES (USDT-M only), BYBIT, DERIBIT, HYPERLIQUID or OKX; `symbol` is

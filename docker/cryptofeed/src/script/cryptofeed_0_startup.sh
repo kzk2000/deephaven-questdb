@@ -4,7 +4,8 @@
 echo "Initializing QuestDB tables..."
 python /cryptofeed/src/init_questdb_tables.py questdb
 
-# Wait to ensure tables are fully initialized before ILP connections
+# Wait to ensure tables are fully initialized before the feeds connect (otherwise the
+# first rows could auto-create tables with default settings)
 echo "Waiting for tables to be fully initialized..."
 sleep 2
 
@@ -18,7 +19,7 @@ echo "Starting orderbooks feed..."
 python /cryptofeed/src/script/cryptofeed_2_orderbooks.py &
 ORDERBOOKS_PID=$!
 
-# Start the perpetual futures process (Binance / Bybit / Deribit / OKX, BTC and ETH)
+# Start the perpetual futures process (Binance / Bybit / Deribit / Hyperliquid / OKX, BTC and ETH)
 echo "Starting perpetuals feed..."
 python /cryptofeed/src/script/cryptofeed_3_perps.py &
 PERPS_PID=$!
