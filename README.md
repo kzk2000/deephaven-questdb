@@ -31,8 +31,8 @@ The QuestDB web console is at http://localhost:9000.
 
 - **Cryptofeed** streams live spot trades and order books from Coinbase, Bitstamp and Kraken
   (BTC/ETH/AVAX/SOL-USD; order books BTC-USD), and BTC/ETH perpetual futures (linear and
-  inverse) from Deribit, OKX, Hyperliquid, Binance (USDT-M) and Bybit. Binance and Bybit are
-  probed at start and skipped where region blocked.
+  inverse) from Deribit, OKX, Hyperliquid and Bybit (WebSocket only, 1000-level books), and
+  Binance (USDT-M) where its REST API is reachable (skipped otherwise: HTTP 451 in some regions).
 - **QuestDB 10.0.1** stores everything in WAL tables: `trades` (deduplicated on
   timestamp/exchange/symbol/trade_id), `orderbooks` (`DOUBLE[][]` levels, 1 h TTL),
   `perps_liquidity` (per-second spread / depth / slippage computed at ingest from the full book),

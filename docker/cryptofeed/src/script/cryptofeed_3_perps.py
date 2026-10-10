@@ -15,7 +15,8 @@ Per second and instrument it also writes `perps_liquidity` (spread, $ depth with
 mid, slippage for $10k..$5m market orders) computed from the full in-memory book, which
 QuestDB turns into the 1-minute view perps_liquidity_1m.
 
-Venues that cannot be reached (Binance and Bybit refuse some regions with HTTP 451/403) are
+Bybit is streamed over WebSocket only (bybit_ws.py; its REST API answers 403 in some regions).
+Venues that cannot be reached (Binance refuses some regions with HTTP 451) are
 skipped and re-probed every PERP_REPROBE_SECONDS; the process restarts itself when one becomes
 reachable so it is picked up without operator action.
 
