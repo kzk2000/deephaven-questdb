@@ -20,8 +20,10 @@ Usage:
     writer.execute_sql("SELECT * FROM trades")  # REST API
 """
 
+import itertools
 import json
 import os
+import time
 import urllib.parse
 import urllib.request
 
@@ -92,6 +94,8 @@ class QuestDBWriter:
         self.verbose = verbose
         self.trades_table = trades_table
         self.orderbooks_table = orderbooks_table
+        # unique suffix for trades that arrive without an id (see write_trade)
+        self._synthetic_ids = itertools.count(1)
         # rows/frames the server rejected (QWP reports these asynchronously)
         self._rejections = [0]
         self._error_handler = _rejection_handler(self._rejections)
@@ -145,6 +149,13 @@ class QuestDBWriter:
             price = data["price"]
             size = data["amount"]
             trade_id = data.get("id")
+            if trade_id is None or trade_id == "":
+                # trades is deduplicated on (timestamp, exchange, symbol, trade_id) and a NULL id
+                # would collapse distinct trades that share a timestamp. Use a unique id: not
+                # idempotent on replay, but nothing is lost.
+                trade_id = f"rx-{time.time_ns()}-{next(self._synthetic_ids)}"
+            else:
+                trade_id = str(trade_id)
             timestamp = data.get("timestamp")
             receipt_timestamp = data["receipt_timestamp"]
 

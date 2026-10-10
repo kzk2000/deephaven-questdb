@@ -6,6 +6,13 @@ This script should be run before starting cryptofeed to ensure tables exist with
 import sys
 import time
 
+# Idempotent trades: a replayed trade (Coinbase re-sends its last match on every subscribe, a
+# restart or a QWP reconnect replay) overwrites itself instead of adding a row. The trade id
+# must be part of the key: thousands of timestamps hold several distinct trades. A NULL id
+# would collapse distinct trades, so the writer always sends one (see questdb_writer.py).
+TRADES_DEDUP_KEYS = ("timestamp", "exchange", "symbol", "trade_id")
+TRADES_DEDUP_SQL = f"ALTER TABLE trades DEDUP ENABLE UPSERT KEYS({', '.join(TRADES_DEDUP_KEYS)})"
+
 
 def execute_sql(host, port, sql):
     """Execute SQL via QuestDB HTTP REST API"""
@@ -107,6 +114,17 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
                     f"    ⚠️  WARNING: trades.timestamp has type {actual_type}, expected TIMESTAMP_NS"
                 )
                 print("       This may cause precision issues. Consider dropping and recreating.")
+
+    # Enable deduplication (idempotent: also applies to tables created before this was added;
+    # rows already stored are not rewritten)
+    print("    Configuring DEDUP: trades (" + ", ".join(TRADES_DEDUP_KEYS) + ")")
+    result = execute_sql(host, http_port, TRADES_DEDUP_SQL)
+    if result and result.get("ddl") == "OK":
+        print("    ✅ DEDUP UPSERT KEYS set for trades")
+    else:
+        print(
+            f"    ⚠️  DEDUP warning: {'Unknown error' if result is None else result.get('error', result)}"
+        )
 
     # Create orderbooks table with QuestDB double arrays for efficient storage
     # SDK v3.0.0+ supports 2D numpy arrays natively for DOUBLE[][] columns
@@ -225,7 +243,7 @@ def init_tables(host="localhost", http_port=9000, wait_for_db=True, max_retries=
     print("📋 Table Configuration Summary:")
     print(f"  {'Table':<25} {'Type':<25} {'Partition':<10} {'TTL':<15}")
     print(f"  {'-' * 25} {'-' * 25} {'-' * 10} {'-' * 15}")
-    print(f"  {'trades':<25} {'price/size DOUBLE':<25} {'DAY':<10} {'None':<15}")
+    print(f"  {'trades':<25} {'DEDUP on trade_id':<25} {'DAY':<10} {'None':<15}")
     print(f"  {'orderbooks':<25} {'DOUBLE[][] Arrays':<25} {'HOUR':<10} {'1 HOURS':<15}")
     print(f"  {'orderbooks_1s':<25} {'Materialized View':<25} {'N/A':<10} {'N/A':<15}")
     print()

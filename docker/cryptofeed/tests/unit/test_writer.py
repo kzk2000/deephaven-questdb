@@ -122,6 +122,44 @@ def test_rows_are_appended_without_per_tick_flush(mock_connect):
     writer.close()
 
 
+def _trade(**overrides):
+    base = {
+        "exchange": "KRAKEN",
+        "symbol": "BTC-USD",
+        "side": "sell",
+        "price": 1.0,
+        "amount": 2.0,
+        "timestamp": 1_700_000_000.5,
+        "receipt_timestamp": 1_700_000_000.6,
+    }
+    base.update(overrides)
+    return base
+
+
+def _written_trade_ids(sender):
+    return [call.kwargs["columns"]["trade_id"] for call in sender.row.call_args_list]
+
+
+def test_trade_id_is_passed_through_as_a_string(mock_connect):
+    writer = QuestDBWriter(host="questdb", verbose=False)
+    writer.write_trade(_trade(id=12345))
+    writer.write_trade(_trade(id="abc"))
+    assert _written_trade_ids(mock_connect.return_value.sender.return_value) == ["12345", "abc"]
+    writer.close()
+
+
+def test_missing_trade_id_gets_a_unique_synthetic_id(mock_connect):
+    """trades is deduplicated on trade_id; a NULL id would merge distinct trades."""
+    writer = QuestDBWriter(host="questdb", verbose=False)
+    writer.write_trade(_trade())  # no id key
+    writer.write_trade(_trade(id=None))
+    writer.write_trade(_trade(id=""))
+    ids = _written_trade_ids(mock_connect.return_value.sender.return_value)
+    assert len(ids) == 3 and len(set(ids)) == 3
+    assert all(i.startswith("rx-") for i in ids)
+    writer.close()
+
+
 def test_close_waits_for_acks_and_releases_connection(mock_connect):
     writer = QuestDBWriter(host="questdb", verbose=False)
     db = mock_connect.return_value

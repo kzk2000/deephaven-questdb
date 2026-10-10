@@ -88,5 +88,32 @@ def test_multiple_trades(writer, mock_trade):
     assert count >= 5, "Should have at least 5 trades"
 
 
+def test_replayed_trades_are_deduplicated(writer, mock_trade, wait_for_rows):
+    """Same trade re-sent (restart replay, reconnect) must not add a row; distinct trades must."""
+    import init_questdb_tables as init
+
+    table = writer.trades_table
+    result = writer.execute_sql(
+        f"CREATE TABLE {table} (timestamp TIMESTAMP_NS, exchange SYMBOL, symbol SYMBOL, "
+        "side SYMBOL, price DOUBLE, size DOUBLE, trade_id VARCHAR) "
+        "TIMESTAMP(timestamp) PARTITION BY DAY WAL"
+    )
+    assert result is not None and "error" not in result
+    keys = ", ".join(init.TRADES_DEDUP_KEYS)
+    result = writer.execute_sql(f"ALTER TABLE {table} DEDUP ENABLE UPSERT KEYS({keys})")
+    assert result is not None and "error" not in result
+
+    writer.write_trade(mock_trade)
+    writer.write_trade(mock_trade)  # exact replay
+    other = dict(mock_trade, id="another-trade")  # same timestamp, different trade
+    writer.write_trade(other)
+    writer.flush(wait=True)
+    wait_for_rows(writer, table, min_rows=2)
+    time.sleep(1)  # let any (wrongly) surviving duplicate land too
+
+    count = writer.execute_sql(f"SELECT count() FROM {table}")["dataset"][0][0]
+    assert count == 2, "replay must collapse, distinct trade ids must both be kept"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
