@@ -39,6 +39,8 @@ class Venue:
     # Seconds without a new row before the venue is STALE. Per venue because cadences differ:
     # Hyperliquid's public book arrives only every ~6 s, the others update many times a second
     stale_after_s: float = 15.0
+    # what limits this venue's published book (shown in the dashboard's "Book coverage" tooltip)
+    coverage_note: str = ""
 
 
 VENUES = (
@@ -47,12 +49,14 @@ VENUES = (
         "Deribit",
         ("BTC-USD-PERP", "BTC-USDC-PERP", "ETH-USD-PERP", "ETH-USDC-PERP"),
         "",
+        coverage_note="Deribit publishes its whole book.",
     ),
     Venue(
         "OKX",
         "OKX",
         ("BTC-USD-PERP", "BTC-USDT-PERP", "ETH-USD-PERP", "ETH-USDT-PERP"),
         "",
+        coverage_note="OKX's public feed is capped at 400 levels per side.",
     ),
     Venue(
         "HYPERLIQUID",
@@ -60,12 +64,20 @@ VENUES = (
         ("BTC-USDC-PERP", "ETH-USDC-PERP"),
         "",
         stale_after_s=30.0,
+        coverage_note=(
+            "Hyperliquid's own book is 20 levels per side; the farther depth comes from "
+            "price-aggregated books and is a lower bound."
+        ),
     ),
     Venue(
         "BINANCE_FUTURES",
         "Binance",
         ("BTC-USDT-PERP", "ETH-USDT-PERP"),  # USDT-M only
         "no data received (REST is region blocked here; the WebSocket feed is down?)",
+        coverage_note=(
+            "Binance's WebSocket partial book is 20 levels per side (about 0.3 bp on BTC); a "
+            "deeper book needs REST, which is blocked from this host."
+        ),
     ),
     Venue(
         "BYBIT",
@@ -79,6 +91,7 @@ VENUES = (
             "ETH-USD-PERP",
         ),
         "no data received (REST is region blocked here; the WebSocket feed is down?)",
+        coverage_note="Bybit publishes 1000 levels per side.",
     ),
 )
 
@@ -87,6 +100,14 @@ CONTRACT_TYPES = ("linear", "inverse")
 
 # Spot venues whose last trade prices form the reference price for basis
 SPOT_REFERENCE_EXCHANGES = ("COINBASE", "KRAKEN", "BITSTAMP")
+
+
+def coverage_note(exchange: str) -> str:
+    """Why this venue's published book reaches only so far (tooltip text)."""
+    for venue in VENUES:
+        if venue.exchange == exchange:
+            return venue.coverage_note
+    return ""
 
 
 def parse_symbol(symbol: str) -> tuple[str, str, str]:

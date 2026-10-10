@@ -182,3 +182,12 @@ def test_labels_and_ratio():
     assert lib.ratio_text(300, 100) == "3.0x"
     assert lib.ratio_text(50, 100) == "0.50x"
     assert lib.ratio_text(None, 100) == "-"
+
+
+def test_every_venue_explains_its_book_coverage():
+    for venue in lib.VENUES:
+        assert venue.coverage_note, venue.exchange
+        assert lib.coverage_note(venue.exchange) == venue.coverage_note
+    assert "20 levels" in lib.coverage_note("BINANCE_FUTURES")
+    assert "1000" in lib.coverage_note("BYBIT")
+    assert lib.coverage_note("NOPE") == ""

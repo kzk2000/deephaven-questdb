@@ -713,7 +713,9 @@ def _pd_card_head(series, symbol, status):
 
 
 @ui.component(memo=True)
-def pd_venue_tile(series, symbol, status, is_ref, note, mid, spread, reach, reach_ok, exact):
+def pd_venue_tile(
+    series, symbol, status, is_ref, note, mid, spread, reach, reach_ok, exact, coverage_note=""
+):
     head = _pd_card_head(series, symbol, status)
     if status == "NO DATA":
         return _pd_card_frame([head, ui.text(note, color=PD_MUTED)], is_ref, muted=True)
@@ -727,8 +729,7 @@ def pd_venue_tile(series, symbol, status, is_ref, note, mid, spread, reach, reac
                 reach,
                 PD_UP if reach_ok else PD_WARN,
                 "How far from mid the venue's published book reaches (min of bid and ask). "
-                "Depth buckets wider than this are lower bounds. Deribit publishes the full "
-                "book; OKX caps its feed at 400 levels per side; Hyperliquid's far buckets are aggregated.",
+                "Depth buckets wider than this are lower bounds. " + coverage_note,
             ),
             ui.text(exact, color=PD_MUTED, UNSAFE_style=_PD_NOTE_STYLE),
         ],
@@ -1058,6 +1059,7 @@ def pd_compare_tab(asset, ctype):
                 f"±{_pd_fmt_reach(reach)}",
                 exact_to == max(pd_lib.BUCKETS_BPS),
                 f"exact to ±{exact_to} bp" if exact_to else "no bucket fully covered",
+                pd_lib.coverage_note(r["exchange"]),
                 key=f"{r['exchange']}:{r['symbol']}",
             )
         )
@@ -1101,7 +1103,8 @@ def pd_compare_tab(asset, ctype):
         depth_block,
         ui.text(
             "≥ amber = lower bound: the bucket is wider than the venue's published book "
-            "(OKX caps its public feed at 400 levels per side; Hyperliquid's far buckets are aggregated). 'Common "
+            "(Deribit publishes the whole book, Bybit 1000 levels per side, OKX 400, Binance and "
+            "Hyperliquid 20; Hyperliquid's farther depth is aggregated). 'Common "
             "coverage' keeps only the buckets every live venue covers completely, for an "
             "apples-to-apples comparison. Bottom row: Deribit's multiple of the deepest other "
             "venue (≤ / ≥ when one side is a lower bound).",
